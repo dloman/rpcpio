@@ -1,0 +1,21 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# Convenience alias: everything a consumer needs to write gRPC services/stubs.
+alias(
+    name = "asio_grpc",
+    actual = "//src:asio_grpc",
+)
+
+# Runtime-only (no codegen); useful when protos are generated externally.
+alias(
+    name = "asio_grpc_runtime",
+    actual = "//src:asio_grpc_runtime",
+)
+
+# The protoc plugin binary.
+alias(
+    name = "asio_grpc_cpp_plugin",
+    actual = "//compiler:asio_grpc_cpp_plugin",
+)

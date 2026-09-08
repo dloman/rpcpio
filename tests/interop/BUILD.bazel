@@ -1,0 +1,69 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+
+package(default_visibility = ["//visibility:private"])
+
+# Official gRPC interop proto definitions (vendored subset).
+proto_library(
+    name = "grpc_testing_proto",
+    srcs = ["grpc_testing.proto"],
+)
+
+cc_proto_library(
+    name = "grpc_testing_cc_proto",
+    deps = [":grpc_testing_proto"],
+)
+
+genrule(
+    name = "grpc_testing_asio_grpc_gen",
+    srcs = ["grpc_testing.proto"],
+    outs = [
+        "grpc_testing.asio_grpc.pb.h",
+        "grpc_testing.asio_grpc.pb.cc",
+    ],
+    cmd = """
+        $(location @protobuf//:protoc) \
+            --plugin=protoc-gen-asio-grpc=$(location //:asio_grpc_cpp_plugin) \
+            --asio-grpc_out=$(RULEDIR) \
+            -I$$(dirname $(location grpc_testing.proto)) \
+            $(location grpc_testing.proto)
+    """,
+    tools = [
+        "@protobuf//:protoc",
+        "//:asio_grpc_cpp_plugin",
+    ],
+)
+
+cc_library(
+    name = "grpc_testing_asio_grpc",
+    srcs = [":grpc_testing_asio_grpc_gen"],
+    hdrs = ["grpc_testing.asio_grpc.pb.h"],
+    copts = ["-std=c++20"],
+    deps = [
+        ":grpc_testing_cc_proto",
+        "//:asio_grpc_runtime",
+    ],
+)
+
+cc_test(
+    name = "interop_client_test",
+    srcs = ["interop_client_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        ":grpc_testing_asio_grpc",
+        "@googletest//:gtest_main",
+    ],
+    # Set TEST_SERVER_HOST and TEST_SERVER_PORT env vars to point at a server.
+    tags = ["requires-network"],
+)
+
+cc_test(
+    name = "interop_server_test",
+    srcs = ["interop_server_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        ":grpc_testing_asio_grpc",
+        "@googletest//:gtest_main",
+    ],
+    tags = ["requires-network"],
+)

@@ -1,0 +1,14 @@
+package(default_visibility = ["//visibility:public"])
+
+cc_binary(
+    name = "asio_grpc_cpp_plugin",
+    srcs = [
+        "asio_grpc_cpp_plugin.cpp",
+        "cpp_generator.cc",
+    ],
+    hdrs = ["cpp_generator.h"],
+    copts = ["-std=c++20"],
+    deps = [
+        "@protobuf//:protoc_lib",
+    ],
+)

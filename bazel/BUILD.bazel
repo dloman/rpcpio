@@ -1,0 +1,2 @@
+package(default_visibility = ["//visibility:private"])
+# defs.bzl is a Starlark library; no build targets here.

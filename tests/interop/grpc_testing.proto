@@ -1,0 +1,53 @@
+// Subset of the official gRPC interoperability test proto.
+// Only unary methods are included; streaming variants are intentionally omitted.
+
+syntax = "proto3";
+
+package grpc.testing;
+
+option cc_enable_arenas = true;
+
+// Test service for unary interop cases.
+service TestService {
+    // One empty request followed by one empty response.
+    rpc EmptyCall(Empty) returns (Empty);
+
+    // One request followed by one response.
+    rpc UnaryCall(SimpleRequest) returns (SimpleResponse);
+}
+
+// An empty message that you can re-use to avoid defining duplicated empty
+// messages in your APIs.
+message Empty {}
+
+enum PayloadType {
+    COMPRESSABLE = 0;
+}
+
+message Payload {
+    PayloadType type = 1;
+    bytes body = 2;
+}
+
+message EchoStatus {
+    int32 code = 1;
+    string message = 2;
+}
+
+message SimpleRequest {
+    PayloadType response_type = 1;
+    int32 response_size = 2;
+    Payload payload = 3;
+    bool fill_username = 4;
+    bool fill_oauth_scope = 5;
+    bool response_compressed = 6;
+    EchoStatus response_status = 7;
+    bool fill_server_id = 9;
+    bool fill_grpclb_route_type = 10;
+}
+
+message SimpleResponse {
+    Payload payload = 1;
+    string username = 2;
+    string oauth_scope = 3;
+}

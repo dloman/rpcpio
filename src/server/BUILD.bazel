@@ -1,0 +1,23 @@
+package(default_visibility = [
+    "//tests:__subpackages__",
+    "//examples:__subpackages__",
+    "//src:__pkg__",
+])
+
+cc_library(
+    name = "server",
+    srcs = [
+        "call_state.cc",
+        "server_impl.cc",
+    ],
+    hdrs = [
+        "call_state.h",
+        "server_impl.h",
+    ],
+    copts = ["-std=c++20"],
+    deps = [
+        "//include:asio_grpc_hdrs",
+        "//src/protocol:protocol",
+        "@nghttp2-asio//:nghttp2_asio",
+    ],
+)

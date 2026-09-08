@@ -1,0 +1,18 @@
+package(default_visibility = ["//visibility:public"])
+
+# Full runtime: client + server + protocol primitives.
+cc_library(
+    name = "asio_grpc_runtime",
+    deps = [
+        "//include:asio_grpc_hdrs",
+        "//src/client:client",
+        "//src/server:server",
+        "//src/protocol:protocol",
+    ],
+)
+
+# Alias used by the root BUILD.
+alias(
+    name = "asio_grpc",
+    actual = ":asio_grpc_runtime",
+)

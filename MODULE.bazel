@@ -1,0 +1,24 @@
+module(
+    name = "asio_grpc",
+    version = "0.1.0",
+    compatibility_level = 1,
+)
+
+# ── Core transport ────────────────────────────────────────────────────────────
+# Provides @nghttp2-asio//:nghttp2_asio, which bundles:
+#   • CESNET/nghttp2-asio (with trailer + GOAWAY extensions)
+#   • Boost 1.90 (Asio, Thread, DateTime)
+#   • libnghttp2 1.65.0
+#   • OpenSSL 3.5.5
+bazel_dep(name = "nghttp2-asio", version = "0.0.90-20260225-464f056")
+
+# ── Protobuf runtime and compiler ────────────────────────────────────────────
+bazel_dep(name = "protobuf", version = "27.3")
+bazel_dep(name = "rules_proto", version = "6.0.0")
+
+# ── Optional compression ──────────────────────────────────────────────────────
+bazel_dep(name = "zlib", version = "1.3.1.bcr.3")
+
+# ── Test infrastructure ───────────────────────────────────────────────────────
+bazel_dep(name = "googletest", version = "1.14.0", dev_dependency = True)
+bazel_dep(name = "rules_fuzzing", version = "0.5.2", dev_dependency = True)

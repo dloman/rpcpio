@@ -1,0 +1,51 @@
+package(default_visibility = ["//visibility:private"])
+
+cc_test(
+    name = "framing_test",
+    srcs = ["framing_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//src/protocol:protocol",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "timeout_test",
+    srcs = ["timeout_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//src/protocol:protocol",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "metadata_test",
+    srcs = ["metadata_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//include:asio_grpc_hdrs",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "status_test",
+    srcs = ["status_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//include:asio_grpc_hdrs",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "compression_test",
+    srcs = ["compression_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//src/protocol:protocol",
+        "@googletest//:gtest_main",
+    ],
+)

@@ -1,0 +1,29 @@
+package(default_visibility = [
+    "//src/client:__pkg__",
+    "//src/server:__pkg__",
+    "//tests:__subpackages__",
+])
+
+cc_library(
+    name = "protocol",
+    srcs = [
+        "compression.cc",
+        "framing.cc",
+        "metadata_codec.cc",
+        "status_map.cc",
+        "timeout.cc",
+    ],
+    hdrs = [
+        "compression.h",
+        "framing.h",
+        "metadata_codec.h",
+        "status_map.h",
+        "timeout.h",
+    ],
+    copts = ["-std=c++20"],
+    deps = [
+        "//include:asio_grpc_hdrs",
+        "@nghttp2-asio//:nghttp2_asio",
+        "@zlib//:zlib",
+    ],
+)
