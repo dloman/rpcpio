@@ -4,7 +4,9 @@ This directory contains the official gRPC interoperability test proto definition
 and test programs that verify `rpcpio` interoperates correctly with reference
 gRPC implementations (C++, Go, Python).
 
-## Tested Unary Cases
+## Tested Cases
+
+### Unary
 
 | Test case                    | Direction  |
 |------------------------------|------------|
@@ -18,6 +20,14 @@ gRPC implementations (C++, Go, Python).
 | `unimplemented_service`      | client     |
 | `client_compressed_unary`    | client (zlib only) |
 | `server_compressed_unary`    | server (zlib only) |
+
+### Streaming (self-contained server test)
+
+| Test case              | RPC variant       |
+|------------------------|-------------------|
+| `StreamingOutputCall`  | server-streaming  |
+| `StreamingInputCall`   | client-streaming  |
+| `FullDuplexCall`       | bidi-streaming    |
 
 ## Running Against a Reference Server
 
@@ -42,6 +52,15 @@ TEST_USE_TLS=true \
 bazel test //tests/interop:interop_client_test \
     --test_output=all \
     --test_env=SSL_CERT_FILE=/path/to/ca.pem
+```
+
+## Running the Self-Contained Server Test
+
+The server test starts an rpcpio server internally and exercises it with the
+rpcpio client — no external binary required.
+
+```sh
+bazel test //tests/interop:interop_server_test --test_output=all
 ```
 
 ## Running a Reference Client Against `rpcpio` Server
@@ -85,9 +104,9 @@ to the server via `--server_cert_file`/`--server_key_file`.
 
 ## Proto Source
 
-`grpc_testing.proto` is a minimal subset of the official interop proto, including
-only the unary methods (`EmptyCall` and `UnaryCall`).  Streaming variants are
-intentionally omitted — `rpcpio` does not support streaming in version 1.
+`grpc_testing.proto` is a subset of the official interop proto covering unary
+methods (`EmptyCall`, `UnaryCall`) and all three streaming variants
+(`StreamingOutputCall`, `StreamingInputCall`, `FullDuplexCall`).
 
 The original canonical proto lives at:
 `github.com/grpc/grpc/blob/master/src/proto/grpc/testing/test.proto`

@@ -148,3 +148,85 @@ TEST(FrameDecoder, MultipleChunksForOneMessage) {
     ASSERT_EQ(dec.state(), FrameDecoder::State::kDone);
     EXPECT_EQ(dec.payload(), payload);
 }
+
+// ── FrameDecoder::Reset ────────────────────────────────────────────────────────
+
+TEST(FrameDecoder, ResetAllowsSecondMessage) {
+    std::string frame1, frame2;
+    EncodeFrame(0, "first", frame1);
+    EncodeFrame(0, "second", frame2);
+
+    FrameDecoder dec;
+    dec.Feed(frame1);
+    ASSERT_EQ(dec.state(), FrameDecoder::State::kDone);
+    EXPECT_EQ(dec.payload(), "first");
+
+    dec.Reset();
+    EXPECT_EQ(dec.state(), FrameDecoder::State::kAwaitingHeader);
+    EXPECT_FALSE(dec.error());
+    EXPECT_FALSE(dec.has_message());
+
+    dec.Feed(frame2);
+    dec.MarkEos();
+    ASSERT_EQ(dec.state(), FrameDecoder::State::kDone);
+    EXPECT_EQ(dec.payload(), "second");
+}
+
+TEST(FrameDecoder, ResetClearsErrorState) {
+    std::string bad_frame;
+    EncodeFrame(0, "msg", bad_frame);
+    bad_frame[0] = 0x42;  // reserved compression flag → error
+
+    FrameDecoder dec;
+    dec.Feed(bad_frame);
+    ASSERT_TRUE(dec.error());
+
+    dec.Reset();
+    EXPECT_EQ(dec.state(), FrameDecoder::State::kAwaitingHeader);
+    EXPECT_FALSE(dec.error());
+
+    std::string good_frame;
+    EncodeFrame(0, "recovered", good_frame);
+    dec.Feed(good_frame);
+    dec.MarkEos();
+    ASSERT_EQ(dec.state(), FrameDecoder::State::kDone);
+    EXPECT_EQ(dec.payload(), "recovered");
+}
+
+TEST(FrameDecoder, ResetMidHeaderAllowsNextMessage) {
+    std::string frame;
+    EncodeFrame(0, "complete", frame);
+
+    FrameDecoder dec;
+    dec.Feed(frame.substr(0, 3));  // partial header, not done yet
+    EXPECT_FALSE(dec.done());
+    EXPECT_FALSE(dec.error());
+
+    dec.Reset();
+    EXPECT_EQ(dec.state(), FrameDecoder::State::kAwaitingHeader);
+
+    dec.Feed(frame);
+    dec.MarkEos();
+    ASSERT_EQ(dec.state(), FrameDecoder::State::kDone);
+    EXPECT_EQ(dec.payload(), "complete");
+}
+
+TEST(FrameDecoder, ResetPreservesMaxMessageSize) {
+    FrameDecoder dec(10);
+
+    std::string good_frame;
+    EncodeFrame(0, "small", good_frame);
+    dec.Feed(good_frame);
+    dec.MarkEos();
+    ASSERT_EQ(dec.state(), FrameDecoder::State::kDone);
+
+    dec.Reset();
+
+    // Craft a frame exceeding the 10-byte limit set at construction.
+    std::string big_frame;
+    big_frame += '\x00';
+    big_frame += '\x00'; big_frame += '\x00'; big_frame += '\x00'; big_frame += '\x0B';
+    big_frame += "hello world";  // 11 bytes
+    dec.Feed(big_frame);
+    EXPECT_TRUE(dec.error());
+}

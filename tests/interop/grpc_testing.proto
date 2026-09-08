@@ -1,5 +1,4 @@
 // Subset of the official gRPC interoperability test proto.
-// Only unary methods are included; streaming variants are intentionally omitted.
 
 syntax = "proto3";
 
@@ -7,13 +6,26 @@ package grpc.testing;
 
 option cc_enable_arenas = true;
 
-// Test service for unary interop cases.
+// Test service covering unary and all three streaming RPC variants.
 service TestService {
     // One empty request followed by one empty response.
     rpc EmptyCall(Empty) returns (Empty);
 
     // One request followed by one response.
     rpc UnaryCall(SimpleRequest) returns (SimpleResponse);
+
+    // Server streaming: the server sends response_size individual responses.
+    // Each response carries a payload of (i+1) bytes where i is its 0-based index.
+    rpc StreamingOutputCall(SimpleRequest) returns (stream SimpleResponse);
+
+    // Client streaming: the client sends a sequence of requests; the server
+    // returns a single response whose payload.body length equals the sum of
+    // all request response_size fields.
+    rpc StreamingInputCall(stream SimpleRequest) returns (SimpleResponse);
+
+    // Bidi streaming: for each request the server echoes back one response
+    // carrying the same payload.body as the request.
+    rpc FullDuplexCall(stream SimpleRequest) returns (stream SimpleResponse);
 }
 
 // An empty message that you can re-use to avoid defining duplicated empty
