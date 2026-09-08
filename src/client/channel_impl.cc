@@ -48,7 +48,7 @@ void ChannelImpl::DoConnect() {
 
     auto wire_session = [self](
             std::shared_ptr<nghttp2::asio_http2::client::session> sess) {
-        sess->on_connect([self, sess](boost::asio::ip::tcp::resolver::iterator) {
+        sess->on_connect([self, sess](boost::asio::ip::tcp::endpoint) {
             self->session_ = sess;
             self->OnConnected({});
         });
@@ -97,7 +97,7 @@ void ChannelImpl::DoConnect() {
         auto sess = std::make_shared<nghttp2::asio_http2::client::session>(
             ioc_, *ssl_ctx, host_, std::to_string(port_));
         sess->on_connect([self, sess, ssl_ctx](
-                boost::asio::ip::tcp::resolver::iterator) {
+                boost::asio::ip::tcp::endpoint) {
             self->session_ = sess;
             self->OnConnected({});
         });
