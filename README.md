@@ -255,8 +255,31 @@ ALPN `h2` is negotiated automatically.
 
 ## Interoperability tests
 
-`tests/interop/` contains a client test and a self-contained server test.  
-The client test runs against any standard gRPC server:
+`tests/interop/` contains a client test and a self-contained server test.
+`grpc_testing.proto` is a minimal subset of the
+[official gRPC interop proto](https://github.com/grpc/grpc/blob/master/src/proto/grpc/testing/test.proto)
+covering only unary methods (`EmptyCall`, `UnaryCall`). Streaming variants
+are intentionally omitted — rpcpio v1 is unary-only.
+
+### gRPC interop test coverage
+
+| Test case | Status | Notes |
+|-----------|--------|-------|
+| `empty_unary` | ✓ | |
+| `large_unary` | ✓ | 314 KiB response payload |
+| `custom_metadata` | ✓ | `x-grpc-test-echo-*` headers |
+| `status_code_and_message` | ✓ | |
+| `special_status_message` | ✓ | percent-encoded message |
+| `timeout_on_sleeping_server` | ✓ | 100 ms deadline |
+| `unimplemented_method` | ✓ | expects UNIMPLEMENTED |
+| `unimplemented_service` | ✓ | expects UNIMPLEMENTED |
+| `client_compressed_unary` | ✓ | zlib only |
+| `server_compressed_unary` | ✓ | zlib only |
+| `cancel_after_begin` | — | requires client streaming |
+| `cancel_after_first_response` | — | requires server streaming |
+| `ping_pong` / `half_duplex` / `full_duplex` | — | streaming (v2) |
+
+### Running the client test against a reference server
 
 ```sh
 TEST_SERVER_HOST=localhost \
@@ -265,7 +288,17 @@ TEST_USE_TLS=false \
 bazel test //tests/interop:interop_client_test --test_output=all
 ```
 
-See [`tests/interop/README.md`](tests/interop/README.md) for full instructions.
+### Running the self-contained server test
+
+```sh
+bazel test //tests/interop:interop_server_test --test_output=all
+```
+
+The server test binds on an OS-assigned ephemeral port and exercises it
+with the rpcpio client — no external binary required.
+
+See [`tests/interop/README.md`](tests/interop/README.md) for TLS setup and
+instructions for pointing the official `grpc_interop_client` at the rpcpio server.
 
 ---
 
