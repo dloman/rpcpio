@@ -70,6 +70,10 @@ public:
     // Description of the error (valid when state() == kError).
     const std::string& error_message() const noexcept { return error_message_; }
 
+    // Reset to kAwaitingHeader; reuses max_message_size_.
+    // Call between successive messages in a streaming context.
+    void Reset();
+
     // True once one complete message has been seen (even before payload is consumed).
     bool has_message() const noexcept { return has_message_; }
 

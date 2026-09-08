@@ -7,12 +7,20 @@ package(default_visibility = [
 cc_library(
     name = "server",
     srcs = [
+        "bidi_streaming_call_state.cc",
         "call_state.cc",
+        "client_streaming_call_state.cc",
+        "raw_server_impls.cc",
         "server_impl.cc",
+        "server_streaming_call_state.cc",
     ],
     hdrs = [
+        "bidi_streaming_call_state.h",
         "call_state.h",
+        "client_streaming_call_state.h",
+        "raw_server_impls.h",
         "server_impl.h",
+        "server_streaming_call_state.h",
     ],
     copts = ["-std=c++20"],
     deps = [

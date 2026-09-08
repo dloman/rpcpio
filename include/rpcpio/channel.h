@@ -10,8 +10,14 @@
 #include <google/protobuf/message.h>
 #include "rpcpio/client_context.h"
 #include "rpcpio/internal/raw_result.h"
+#include "rpcpio/internal/raw_client_reader.h"
+#include "rpcpio/internal/raw_client_writer.h"
 #include "rpcpio/status.h"
 #include "rpcpio/unary_method.h"
+#include "rpcpio/streaming_method.h"
+#include "rpcpio/client_reader.h"
+#include "rpcpio/client_writer.h"
+#include "rpcpio/bidi_stream.h"
 
 namespace rpcpio {
 
@@ -87,15 +93,70 @@ public:
         co_return result;
     }
 
+    // Execute a server-streaming RPC (one request, many responses).
+    template<typename Req, typename Resp>
+    boost::asio::awaitable<ClientReader<Resp>>
+    ServerStreamingCall(const ServerStreamingMethod<Req, Resp>& method,
+                        ClientContext&                           ctx,
+                        const Req&                               req) {
+        std::string req_bytes;
+        if (!req.SerializeToString(&req_bytes)) {
+            // Serialization error: send an empty body — the server will reject it.
+            // An empty req_bytes still produces a valid 5-byte LPM frame (length=0).
+            req_bytes = "";
+        }
+        internal::RawClientReader raw =
+            co_await ServerStreamingCallRaw(method.path, ctx, req_bytes);
+        co_return ClientReader<Resp>(std::move(raw));
+    }
+
+    // Execute a client-streaming RPC (many requests, one response).
+    template<typename Req, typename Resp>
+    boost::asio::awaitable<ClientWriter<Req, Resp>>
+    ClientStreamingCall(const ClientStreamingMethod<Req, Resp>& method,
+                        ClientContext&                           ctx) {
+        internal::RawClientWriter raw =
+            co_await ClientStreamingCallRaw(method.path, ctx);
+        co_return ClientWriter<Req, Resp>(std::move(raw));
+    }
+
+    // Execute a bidi-streaming RPC (many requests, many responses).
+    template<typename Req, typename Resp>
+    boost::asio::awaitable<BidiStream<Req, Resp>>
+    BidiStreamingCall(const BidiStreamingMethod<Req, Resp>& method,
+                      ClientContext&                         ctx) {
+        RawBidiHandles bh = co_await BidiStreamingCallRaw(method.path, ctx);
+        co_return BidiStream<Req, Resp>(std::move(bh.reader), std::move(bh.writer));
+    }
+
     Channel(const Channel&)            = delete;
     Channel& operator=(const Channel&) = delete;
 
 private:
-    // Type-erased network call; implemented in channel_impl.cc.
+    // Pair of raw handles returned by BidiStreamingCallRaw.
+    struct RawBidiHandles {
+        internal::RawClientReader reader;
+        internal::RawClientWriter writer;
+    };
+
+    // Type-erased network calls; implemented in channel_impl.cc.
     boost::asio::awaitable<internal::UnaryResultRaw>
     UnaryCallRaw(std::string_view path,
                  ClientContext&   ctx,
                  std::string_view request_bytes);
+
+    boost::asio::awaitable<internal::RawClientReader>
+    ServerStreamingCallRaw(std::string_view path,
+                           ClientContext&   ctx,
+                           std::string_view request_bytes);
+
+    boost::asio::awaitable<internal::RawClientWriter>
+    ClientStreamingCallRaw(std::string_view path,
+                           ClientContext&   ctx);
+
+    boost::asio::awaitable<RawBidiHandles>
+    BidiStreamingCallRaw(std::string_view path,
+                         ClientContext&   ctx);
 
     std::shared_ptr<internal::ChannelImpl> impl_;
 };

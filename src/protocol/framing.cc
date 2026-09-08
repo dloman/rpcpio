@@ -110,6 +110,16 @@ void FrameDecoder::Feed(std::string_view chunk) {
     }
 }
 
+void FrameDecoder::Reset() {
+    state_         = State::kAwaitingHeader;
+    header_bytes_  = 0;
+    compress_flag_ = 0;
+    payload_len_   = 0;
+    payload_.clear();
+    error_message_.clear();
+    has_message_   = false;
+}
+
 void FrameDecoder::MarkEos() {
     if (state_ == State::kError || state_ == State::kDone) return;
     // Incomplete header or payload at EOS is an error.

@@ -8,10 +8,18 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <nghttp2/asio_http2_server.h>
 #include "rpcpio/server.h"
+#include "rpcpio/server_context.h"
+#include "rpcpio/status.h"
+#include "rpcpio/internal/raw_server_reader.h"
+#include "rpcpio/internal/raw_server_writer.h"
 #include "src/server/call_state.h"
+#include "src/server/server_streaming_call_state.h"
+#include "src/server/client_streaming_call_state.h"
+#include "src/server/bidi_streaming_call_state.h"
 
 namespace rpcpio::internal {
 
@@ -22,6 +30,12 @@ public:
 
     // Register a handler for an exact RPC path.  Not thread-safe after Start().
     void RegisterUnaryRaw(std::string_view path, RawHandler handler);
+    void RegisterServerStreamingRaw(std::string_view path,
+                                     RawServerStreamingHandler handler);
+    void RegisterClientStreamingRaw(std::string_view path,
+                                     RawClientStreamingHandler handler);
+    void RegisterBidiRaw(std::string_view path,
+                          RawBidiStreamingHandler handler);
 
     // Bind and start accepting connections.  If port is 0 the OS picks an
     // ephemeral port; call bound_port() afterward to discover it.
@@ -47,7 +61,13 @@ private:
     boost::asio::io_context&  ioc_;
     ServerOptions             opts_;
     nghttp2::asio_http2::server::http2 http2_;
-    std::unordered_map<std::string, RawHandler> handlers_;
+
+    // One map per RPC kind.
+    std::unordered_map<std::string, RawHandler>                handlers_;
+    std::unordered_map<std::string, RawServerStreamingHandler> server_streaming_handlers_;
+    std::unordered_map<std::string, RawClientStreamingHandler> client_streaming_handlers_;
+    std::unordered_map<std::string, RawBidiStreamingHandler>   bidi_handlers_;
+
     std::vector<std::thread>  threads_;
     std::atomic<bool>         shutdown_{false};
     std::uint16_t             bound_port_{0};

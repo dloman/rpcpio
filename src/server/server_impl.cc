@@ -1,5 +1,8 @@
 #include "server_impl.h"
 #include "call_state.h"
+#include "server_streaming_call_state.h"
+#include "client_streaming_call_state.h"
+#include "bidi_streaming_call_state.h"
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl/context.hpp>
@@ -21,6 +24,21 @@ ServerImpl::~ServerImpl() {
 
 void ServerImpl::RegisterUnaryRaw(std::string_view path, RawHandler handler) {
     handlers_[std::string(path)] = std::move(handler);
+}
+
+void ServerImpl::RegisterServerStreamingRaw(std::string_view path,
+                                             RawServerStreamingHandler handler) {
+    server_streaming_handlers_[std::string(path)] = std::move(handler);
+}
+
+void ServerImpl::RegisterClientStreamingRaw(std::string_view path,
+                                             RawClientStreamingHandler handler) {
+    client_streaming_handlers_[std::string(path)] = std::move(handler);
+}
+
+void ServerImpl::RegisterBidiRaw(std::string_view path,
+                                  RawBidiStreamingHandler handler) {
+    bidi_handlers_[std::string(path)] = std::move(handler);
 }
 
 std::uint16_t ServerImpl::ResolvePort(std::uint16_t port) {
@@ -140,24 +158,59 @@ void ServerImpl::HandleRequest(
         return;
     }
 
-    // Look up handler.
-    auto it = handlers_.find(path);
-    if (it == handlers_.end()) {
-        nghttp2::asio_http2::header_map trail;
-        protocol::BuildTrailers(
-            Status{StatusCode::UNIMPLEMENTED,
-                   "unknown method: " + path}, {}, trail);
-        resp.write_head(200, trail);
-        resp.end();
-        return;
+    // Look up handler: check all four RPC kind maps in order.
+    {
+        auto it = handlers_.find(path);
+        if (it != handlers_.end()) {
+            auto state = std::make_shared<ServerCallState>(
+                ioc_, req, resp, it->second,
+                opts_.max_request_message_size,
+                opts_.max_metadata_size);
+            state->Start();
+            return;
+        }
+    }
+    {
+        auto it = server_streaming_handlers_.find(path);
+        if (it != server_streaming_handlers_.end()) {
+            auto state = std::make_shared<ServerStreamingCallState>(
+                ioc_, req, resp, it->second,
+                opts_.max_request_message_size,
+                opts_.max_metadata_size);
+            state->Start();
+            return;
+        }
+    }
+    {
+        auto it = client_streaming_handlers_.find(path);
+        if (it != client_streaming_handlers_.end()) {
+            auto state = std::make_shared<ClientStreamingCallState>(
+                ioc_, req, resp, it->second,
+                opts_.max_request_message_size,
+                opts_.max_metadata_size);
+            state->Start();
+            return;
+        }
+    }
+    {
+        auto it = bidi_handlers_.find(path);
+        if (it != bidi_handlers_.end()) {
+            auto state = std::make_shared<BidiStreamingCallState>(
+                ioc_, req, resp, it->second,
+                opts_.max_request_message_size,
+                opts_.max_metadata_size);
+            state->Start();
+            return;
+        }
     }
 
-    // Create and start per-call state.
-    auto state = std::make_shared<ServerCallState>(
-        ioc_, req, resp, it->second,
-        opts_.max_request_message_size,
-        opts_.max_metadata_size);
-    state->Start();
+    // No handler found.
+    nghttp2::asio_http2::header_map trail;
+    protocol::BuildTrailers(
+        Status{StatusCode::UNIMPLEMENTED,
+               "unknown method: " + path}, {}, trail);
+    resp.write_head(200, trail);
+    resp.end();
 }
 
 } // namespace rpcpio::internal
@@ -176,6 +229,21 @@ Server::~Server() = default;
 
 void Server::RegisterUnaryRaw(std::string_view path, RawHandler handler) {
     impl_->RegisterUnaryRaw(path, std::move(handler));
+}
+
+void Server::RegisterServerStreamingRaw(std::string_view path,
+                                         RawServerStreamingHandler handler) {
+    impl_->RegisterServerStreamingRaw(path, std::move(handler));
+}
+
+void Server::RegisterClientStreamingRaw(std::string_view path,
+                                         RawClientStreamingHandler handler) {
+    impl_->RegisterClientStreamingRaw(path, std::move(handler));
+}
+
+void Server::RegisterBidiRaw(std::string_view path,
+                               RawBidiStreamingHandler handler) {
+    impl_->RegisterBidiRaw(path, std::move(handler));
 }
 
 void Server::Start(std::string host, std::uint16_t port) {

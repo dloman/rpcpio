@@ -8,8 +8,13 @@
 
 namespace rpcpio {
 
-// Forward declaration for the friend relationship.
-namespace internal { class ServerCallState; }
+// Forward declarations for the friend relationships.
+namespace internal {
+class ServerCallState;
+class ServerStreamingCallState;
+class ClientStreamingCallState;
+class BidiStreamingCallState;
+}
 
 class ServerContext {
 public:
@@ -50,6 +55,9 @@ public:
 
 private:
     friend class internal::ServerCallState;
+    friend class internal::ServerStreamingCallState;
+    friend class internal::ClientStreamingCallState;
+    friend class internal::BidiStreamingCallState;
 
     void set_peer(std::string peer)                                       { peer_ = std::move(peer); }
     void set_deadline(std::chrono::system_clock::time_point d)            { deadline_ = d; }
