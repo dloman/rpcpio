@@ -67,3 +67,12 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Bazel
+bazel-*
+.bazel/
+user.bazelrc
+
+# Fuzz corpus
+tests/fuzz/corpus/
+tests/fuzz/artifacts/
