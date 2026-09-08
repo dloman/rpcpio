@@ -8,12 +8,12 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <google/protobuf/message.h>
-#include "asio_grpc/client_context.h"
-#include "asio_grpc/internal/raw_result.h"
-#include "asio_grpc/status.h"
-#include "asio_grpc/unary_method.h"
+#include "rpcpio/client_context.h"
+#include "rpcpio/internal/raw_result.h"
+#include "rpcpio/status.h"
+#include "rpcpio/unary_method.h"
 
-namespace asio_grpc {
+namespace rpcpio {
 
 namespace internal { class ChannelImpl; }
 
@@ -30,7 +30,7 @@ struct ChannelOptions {
 
     // Timeouts and identification
     std::chrono::milliseconds connect_timeout{5000};
-    std::string user_agent{"asio-grpc/0.1"};
+    std::string user_agent{"rpcpio/0.1"};
 
     // Per-call size limits (bytes)
     std::size_t max_receive_message_size{4 * 1024 * 1024};
@@ -100,4 +100,4 @@ private:
     std::shared_ptr<internal::ChannelImpl> impl_;
 };
 
-} // namespace asio_grpc
+} // namespace rpcpio

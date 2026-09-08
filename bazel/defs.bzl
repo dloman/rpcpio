@@ -1,11 +1,11 @@
-"""Starlark rules and macros for the asio_grpc library."""
+"""Starlark rules and macros for the rpcpio library."""
 
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 
-# ── Private rule: run asio_grpc_cpp_plugin via protoc ────────────────────────
+# ── Private rule: run rpcpio_cpp_plugin via protoc ────────────────────────
 
-def _asio_grpc_generate_impl(ctx):
+def _rpcpio_generate_impl(ctx):
     proto_info = ctx.attr.proto[ProtoInfo]
     plugin = ctx.executable.plugin
     protoc = ctx.executable.protoc
@@ -15,18 +15,18 @@ def _asio_grpc_generate_impl(ctx):
 
     for src in proto_info.direct_sources:
         stem = src.basename[:-len(".proto")]
-        out_h  = ctx.actions.declare_file(stem + ".asio_grpc.pb.h")
-        out_cc = ctx.actions.declare_file(stem + ".asio_grpc.pb.cc")
+        out_h  = ctx.actions.declare_file(stem + ".rpcpio.pb.h")
+        out_cc = ctx.actions.declare_file(stem + ".rpcpio.pb.cc")
         all_hdrs.append(out_h)
         all_srcs.append(out_cc)
 
         args = ctx.actions.args()
-        args.add("--plugin=protoc-gen-asio-grpc=" + plugin.path)
-        args.add("--asio-grpc_out=" + out_h.dirname)
+        args.add("--plugin=protoc-gen-rpcpio=" + plugin.path)
+        args.add("--rpcpio_out=" + out_h.dirname)
 
         # Setting --proto_path to the directory that contains this .proto file
         # causes protoc to pass only the bare filename (e.g. "foo.proto") to the
-        # plugin, so the plugin emits "foo.asio_grpc.pb.h" directly into outdir.
+        # plugin, so the plugin emits "foo.rpcpio.pb.h" directly into outdir.
         args.add("--proto_path=" + src.dirname)
 
         # Transitive proto paths: needed for any imports inside the .proto file
@@ -44,8 +44,8 @@ def _asio_grpc_generate_impl(ctx):
                 transitive = [proto_info.transitive_sources],
             ),
             outputs = [out_h, out_cc],
-            mnemonic = "AsioGrpcGenerate",
-            progress_message = "Generating asio_grpc bindings for " + src.basename,
+            mnemonic = "RpcpioGenerate",
+            progress_message = "Generating rpcpio bindings for " + src.basename,
         )
 
     return [
@@ -56,8 +56,8 @@ def _asio_grpc_generate_impl(ctx):
         ),
     ]
 
-_asio_grpc_generate = rule(
-    implementation = _asio_grpc_generate_impl,
+_rpcpio_generate = rule(
+    implementation = _rpcpio_generate_impl,
     attrs = {
         "proto": attr.label(
             providers = [ProtoInfo],
@@ -66,7 +66,7 @@ _asio_grpc_generate = rule(
         "plugin": attr.label(
             executable = True,
             cfg = "exec",
-            default = Label("//:asio_grpc_cpp_plugin"),
+            default = Label("//:rpcpio_cpp_plugin"),
         ),
         "protoc": attr.label(
             executable = True,
@@ -78,17 +78,17 @@ _asio_grpc_generate = rule(
 
 # ── Public macros ─────────────────────────────────────────────────────────────
 
-def asio_grpc_library(
+def rpcpio_library(
         name,
         proto,
         deps = [],
         visibility = None,
         **kwargs):
-    """Generate asio_grpc typed stub + service for a proto_library target.
+    """Generate rpcpio typed stub + service for a proto_library target.
 
     Creates:
       <name>_cc_proto   — cc_proto_library for the message classes
-      <name>_gen        — rule that runs asio_grpc_cpp_plugin via protoc
+      <name>_gen        — rule that runs rpcpio_cpp_plugin via protoc
       <name>_gen_hdrs   — filegroup selecting only the generated headers
       <name>_gen_srcs   — filegroup selecting only the generated sources
       <name>            — cc_library combining everything
@@ -111,7 +111,7 @@ def asio_grpc_library(
         visibility = ["//visibility:private"],
     )
 
-    _asio_grpc_generate(
+    _rpcpio_generate(
         name = gen_name,
         proto = proto,
         visibility = ["//visibility:private"],
@@ -139,22 +139,22 @@ def asio_grpc_library(
         hdrs = [":" + gen_hdrs_name],
         deps = [
             ":" + cc_proto_name,
-            "//:asio_grpc_runtime",
+            "//:rpcpio_runtime",
         ] + deps,
         visibility = visibility,
         **kwargs
     )
 
-def asio_grpc_proto_library(
+def rpcpio_proto_library(
         name,
         srcs,
         deps = [],
         visibility = None):
-    """Convenience macro: proto_library + asio_grpc_library in one call.
+    """Convenience macro: proto_library + rpcpio_library in one call.
 
     Creates:
       <name>_proto  — proto_library
-      <name>        — asio_grpc_library (cc_library with bindings)
+      <name>        — rpcpio_library (cc_library with bindings)
 
     Args:
       name:       Base name.
@@ -169,7 +169,7 @@ def asio_grpc_proto_library(
         deps = deps,
         visibility = visibility or ["//visibility:private"],
     )
-    asio_grpc_library(
+    rpcpio_library(
         name = name,
         proto = ":" + proto_name,
         visibility = visibility,

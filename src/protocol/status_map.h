@@ -1,9 +1,9 @@
 #pragma once
 
 #include <string_view>
-#include "asio_grpc/status.h"
+#include "rpcpio/status.h"
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 // Map an nghttp2 library error code (NGHTTP2_ERR_*) to a gRPC StatusCode.
 StatusCode NgHttp2ErrToStatusCode(int nghttp2_error) noexcept;
@@ -18,4 +18,4 @@ StatusCode TlsErrorToStatusCode(std::string_view description) noexcept;
 // Handles common cases: connection_refused, timed_out, eof, etc.
 StatusCode AsioErrorToStatusCode(int ec_value, bool is_connection) noexcept;
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

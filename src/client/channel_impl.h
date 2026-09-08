@@ -13,11 +13,11 @@
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <nghttp2/asio_http2_client.h>
-#include "asio_grpc/channel.h"
-#include "asio_grpc/client_context.h"
-#include "asio_grpc/internal/raw_result.h"
+#include "rpcpio/channel.h"
+#include "rpcpio/client_context.h"
+#include "rpcpio/internal/raw_result.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 class ClientCallState;
 
@@ -88,4 +88,4 @@ private:
     std::map<std::int32_t, std::shared_ptr<ClientCallState>> active_calls_;
 };
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal

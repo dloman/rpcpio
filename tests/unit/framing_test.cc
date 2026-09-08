@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "src/protocol/framing.h"
 
-using namespace asio_grpc::protocol;
+using namespace rpcpio::protocol;
 
 // ── EncodeFrame ───────────────────────────────────────────────────────────────
 

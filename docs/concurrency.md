@@ -2,7 +2,7 @@
 
 ## Threading Model
 
-`asio_grpc` uses **Boost.Asio** as its execution framework.  All internal state
+`rpcpio` uses **Boost.Asio** as its execution framework.  All internal state
 is confined to a single `boost::asio::io_context` (the "channel executor") and
 is accessed only from threads running that context.
 

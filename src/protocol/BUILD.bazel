@@ -22,7 +22,7 @@ cc_library(
     ],
     copts = ["-std=c++20"],
     deps = [
-        "//include:asio_grpc_hdrs",
+        "//include:rpcpio_hdrs",
         "@nghttp2-asio//:nghttp2_asio",
         "@zlib//:zlib",
     ],

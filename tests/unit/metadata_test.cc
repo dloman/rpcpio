@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "asio_grpc/metadata.h"
+#include "rpcpio/metadata.h"
 
-using namespace asio_grpc;
-using namespace asio_grpc::metadata;
+using namespace rpcpio;
+using namespace rpcpio::metadata;
 
 // ── Key validation ────────────────────────────────────────────────────────────
 

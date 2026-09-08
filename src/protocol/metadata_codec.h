@@ -3,12 +3,12 @@
 #include <string>
 #include <string_view>
 #include <nghttp2/asio_http2.h>
-#include "asio_grpc/metadata.h"
-#include "asio_grpc/status.h"
+#include "rpcpio/metadata.h"
+#include "rpcpio/status.h"
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
-// ── nghttp2 header_map ↔ asio_grpc MetadataMap conversion ────────────────────
+// ── nghttp2 header_map ↔ rpcpio MetadataMap conversion ────────────────────
 
 // Convert nghttp2 response/request headers to a MetadataMap.
 // - Skips HTTP pseudo-headers (:status, :path, :method, etc.)
@@ -49,4 +49,4 @@ void BuildTrailers(const Status&                    status,
                    const MetadataMap&               trailing_metadata,
                    nghttp2::asio_http2::header_map& out);
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

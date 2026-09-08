@@ -5,7 +5,7 @@
 #include "src/protocol/metadata_codec.h"
 #include "src/protocol/status_map.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 ClientCallState::ClientCallState(boost::asio::io_context& ioc,
                                   ClientContext*           ctx,
@@ -175,4 +175,4 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
     });
 }
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal

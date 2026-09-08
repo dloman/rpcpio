@@ -10,10 +10,10 @@
 #include <vector>
 #include <boost/asio/io_context.hpp>
 #include <nghttp2/asio_http2_server.h>
-#include "asio_grpc/server.h"
+#include "rpcpio/server.h"
 #include "src/server/call_state.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 class ServerImpl {
 public:
@@ -53,4 +53,4 @@ private:
     std::uint16_t             bound_port_{0};
 };
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal

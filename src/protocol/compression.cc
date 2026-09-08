@@ -3,14 +3,14 @@
 #include <cstring>
 
 // Include zlib if available at compile time.
-#ifdef ASIO_GRPC_ENABLE_GZIP
+#ifdef RPCPIO_ENABLE_GZIP
 #  include <zlib.h>
 #endif
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 bool GzipAvailable() noexcept {
-#ifdef ASIO_GRPC_ENABLE_GZIP
+#ifdef RPCPIO_ENABLE_GZIP
     return true;
 #else
     return false;
@@ -19,7 +19,7 @@ bool GzipAvailable() noexcept {
 
 std::optional<Encoding> ParseEncoding(std::string_view s) noexcept {
     if (s == "identity") return Encoding::kIdentity;
-#ifdef ASIO_GRPC_ENABLE_GZIP
+#ifdef RPCPIO_ENABLE_GZIP
     if (s == "gzip")     return Encoding::kGzip;
 #endif
     return std::nullopt;
@@ -35,7 +35,7 @@ std::string_view EncodingName(Encoding enc) noexcept {
 
 std::string AcceptEncodingValue() {
     std::string v = "identity";
-#ifdef ASIO_GRPC_ENABLE_GZIP
+#ifdef RPCPIO_ENABLE_GZIP
     v += ",gzip";
 #endif
     return v;
@@ -46,7 +46,7 @@ bool Compress(Encoding enc, std::string_view src, std::string& out) {
         out.assign(src.data(), src.size());
         return true;
     }
-#ifdef ASIO_GRPC_ENABLE_GZIP
+#ifdef RPCPIO_ENABLE_GZIP
     if (enc == Encoding::kGzip) {
         z_stream zs{};
         if (deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
@@ -85,7 +85,7 @@ bool Decompress(Encoding enc,
         out.assign(src.data(), src.size());
         return true;
     }
-#ifdef ASIO_GRPC_ENABLE_GZIP
+#ifdef RPCPIO_ENABLE_GZIP
     if (enc == Encoding::kGzip) {
         z_stream zs{};
         if (inflateInit2(&zs, 15 + 16) != Z_OK) return false;
@@ -115,4 +115,4 @@ bool Decompress(Encoding enc,
     return false;
 }
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

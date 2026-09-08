@@ -8,11 +8,11 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <google/protobuf/message.h>
-#include "asio_grpc/server_context.h"
-#include "asio_grpc/status.h"
-#include "asio_grpc/unary_method.h"
+#include "rpcpio/server_context.h"
+#include "rpcpio/status.h"
+#include "rpcpio/unary_method.h"
 
-namespace asio_grpc {
+namespace rpcpio {
 
 namespace internal { class ServerImpl; }
 
@@ -102,4 +102,4 @@ private:
     std::shared_ptr<internal::ServerImpl> impl_;
 };
 
-} // namespace asio_grpc
+} // namespace rpcpio

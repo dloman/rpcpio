@@ -25,7 +25,7 @@ cc_test(
     srcs = ["metadata_test.cc"],
     copts = ["-std=c++20"],
     deps = [
-        "//include:asio_grpc_hdrs",
+        "//include:rpcpio_hdrs",
         "@googletest//:gtest_main",
     ],
 )
@@ -35,7 +35,7 @@ cc_test(
     srcs = ["status_test.cc"],
     copts = ["-std=c++20"],
     deps = [
-        "//include:asio_grpc_hdrs",
+        "//include:rpcpio_hdrs",
         "@googletest//:gtest_main",
     ],
 )

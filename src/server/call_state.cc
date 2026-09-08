@@ -12,7 +12,7 @@
 #include "src/protocol/status_map.h"
 #include "src/protocol/timeout.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 ServerCallState::ServerCallState(
     boost::asio::io_context&                        ioc,
@@ -262,4 +262,4 @@ void ServerCallState::SendResponse(const Status&      status,
     });
 }
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal

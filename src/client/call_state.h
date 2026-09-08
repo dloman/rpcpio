@@ -8,13 +8,13 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <nghttp2/asio_http2_client.h>
-#include "asio_grpc/client_context.h"
-#include "asio_grpc/internal/raw_result.h"
+#include "rpcpio/client_context.h"
+#include "rpcpio/internal/raw_result.h"
 #include "src/protocol/compression.h"
 #include "src/protocol/framing.h"
 #include "src/protocol/metadata_codec.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 // Manages the complete lifecycle of one unary RPC from the client side.
 // Created when a stream is submitted; destroyed once the completion fires.
@@ -60,4 +60,4 @@ private:
     bool                        trailers_done_{false};
 };
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal

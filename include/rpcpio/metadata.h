@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-namespace asio_grpc {
+namespace rpcpio {
 
 using MetadataValue = std::string;
 
@@ -175,4 +175,4 @@ inline std::size_t TotalSize(const MetadataMap& m) noexcept {
 }
 
 } // namespace metadata
-} // namespace asio_grpc
+} // namespace rpcpio

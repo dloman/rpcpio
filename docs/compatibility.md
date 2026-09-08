@@ -54,7 +54,7 @@ It wraps the CESNET/nghttp2-asio snapshot at commit
 5. Separate size limit for trailers (configurable, default 8 KiB).
 
 These changes are published as a successor version in the GM BCR.  The released
-`asio_grpc` library depends only on the numbered registry version; it never
+`rpcpio` library depends only on the numbered registry version; it never
 references a Git branch or ad-hoc archive.
 
 ---
@@ -85,10 +85,10 @@ Bzlmod (`--enable_bzlmod`) is required.  Legacy WORKSPACE mode is not supported.
 
 ## API Stability Guarantees
 
-`asio_grpc` follows semantic versioning:
+`rpcpio` follows semantic versioning:
 
 - **0.x.y** — public API may change between minor versions.
-- **1.0+** — public headers in `include/asio_grpc/` are stable (additions are
+- **1.0+** — public headers in `include/rpcpio/` are stable (additions are
   backward compatible; removals require a major version bump).
 
 The following are **not** part of the stable API:

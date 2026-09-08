@@ -4,10 +4,10 @@
 #include <optional>
 #include <string>
 #include <boost/asio/cancellation_signal.hpp>
-#include "asio_grpc/metadata.h"
-#include "asio_grpc/status.h"
+#include "rpcpio/metadata.h"
+#include "rpcpio/status.h"
 
-namespace asio_grpc {
+namespace rpcpio {
 
 class ClientContext {
 public:
@@ -71,4 +71,4 @@ private:
     boost::asio::cancellation_signal cancel_signal_;
 };
 
-} // namespace asio_grpc
+} // namespace rpcpio

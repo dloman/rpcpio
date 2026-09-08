@@ -1,9 +1,9 @@
 package(default_visibility = ["//visibility:public"])
 
 cc_binary(
-    name = "asio_grpc_cpp_plugin",
+    name = "rpcpio_cpp_plugin",
     srcs = [
-        "asio_grpc_cpp_plugin.cpp",
+        "rpcpio_cpp_plugin.cpp",
         "cpp_generator.cc",
     ],
     hdrs = ["cpp_generator.h"],

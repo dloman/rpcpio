@@ -1,11 +1,11 @@
 # Protocol Mapping
 
-This document describes how `asio_grpc` maps the gRPC HTTP/2 protocol to its
+This document describes how `rpcpio` maps the gRPC HTTP/2 protocol to its
 internal primitives and how each wire element is translated to/from the public API.
 
 ## Scope
 
-`asio_grpc` implements **standard unary gRPC over HTTP/2** as specified in
+`rpcpio` implements **standard unary gRPC over HTTP/2** as specified in
 [gRPC over HTTP2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md).
 Streaming RPCs, grpc-web, HTTP/3, xDS, and client-side load balancing are
 **explicitly deferred** and not part of this implementation.
@@ -44,7 +44,7 @@ te:                     trailers
 grpc-timeout:           <TimeoutValue><TimeoutUnit>   (optional)
 grpc-encoding:          <algorithm>                   (optional)
 grpc-accept-encoding:   identity[,gzip]               (server → client)
-user-agent:             asio-grpc/0.1
+user-agent:             rpcpio/0.1
 <custom metadata key>:  <value>                       (optional, repeatable)
 
 <LPM frame(s)>
@@ -81,7 +81,7 @@ grpc-status-details-bin: <base64>           ← optional
 
 When the server rejects a call before producing a response body (e.g., unknown
 method, malformed request), the gRPC status appears in the **initial** HEADERS
-block.  `asio_grpc` detects this by checking for `grpc-status` in the first
+block.  `rpcpio` detects this by checking for `grpc-status` in the first
 HEADERS frame and treats the call as complete without waiting for DATA frames.
 
 ---
@@ -157,7 +157,7 @@ and does not require the Google APIs protos in the core runtime.
 | Encoding   | Support           |
 |------------|-------------------|
 | `identity` | Always available  |
-| `gzip`     | When `ASIO_GRPC_ENABLE_GZIP=1` and zlib is linked |
+| `gzip`     | When `RPCPIO_ENABLE_GZIP=1` and zlib is linked |
 
 The library never advertises an encoding it cannot decompress.
 A compressed flag without a negotiated encoding → `INTERNAL` error.

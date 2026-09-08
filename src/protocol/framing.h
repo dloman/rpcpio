@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 // ── gRPC length-prefixed message framing ─────────────────────────────────────
 //
@@ -93,4 +93,4 @@ private:
     std::string   error_message_;
 };
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

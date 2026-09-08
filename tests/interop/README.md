@@ -1,7 +1,7 @@
 # Interoperability Tests
 
 This directory contains the official gRPC interoperability test proto definitions
-and test programs that verify `asio_grpc` interoperates correctly with reference
+and test programs that verify `rpcpio` interoperates correctly with reference
 gRPC implementations (C++, Go, Python).
 
 ## Tested Unary Cases
@@ -44,13 +44,13 @@ bazel test //tests/interop:interop_client_test \
     --test_env=SSL_CERT_FILE=/path/to/ca.pem
 ```
 
-## Running a Reference Client Against `asio_grpc` Server
+## Running a Reference Client Against `rpcpio` Server
 
-Start the `asio_grpc` server (from `interop_server_test`), then point the
+Start the `rpcpio` server (from `interop_server_test`), then point the
 official `grpc_interop_client` at it:
 
 ```sh
-# Start asio_grpc server
+# Start rpcpio server
 bazel run //tests/interop:interop_server_test &
 
 # Run official client (adjust path)
@@ -87,7 +87,7 @@ to the server via `--server_cert_file`/`--server_key_file`.
 
 `grpc_testing.proto` is a minimal subset of the official interop proto, including
 only the unary methods (`EmptyCall` and `UnaryCall`).  Streaming variants are
-intentionally omitted — `asio_grpc` does not support streaming in version 1.
+intentionally omitted — `rpcpio` does not support streaming in version 1.
 
 The original canonical proto lives at:
 `github.com/grpc/grpc/blob/master/src/proto/grpc/testing/test.proto`

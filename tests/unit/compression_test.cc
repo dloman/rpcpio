@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "src/protocol/compression.h"
 
-using namespace asio_grpc::protocol;
+using namespace rpcpio::protocol;
 
 TEST(Compression, IdentityRoundtrip) {
     std::string src = "hello compression world";
@@ -48,7 +48,7 @@ TEST(Compression, AcceptEncodingIncludesIdentity) {
     EXPECT_NE(val.find("identity"), std::string::npos);
 }
 
-#ifdef ASIO_GRPC_ENABLE_GZIP
+#ifdef RPCPIO_ENABLE_GZIP
 TEST(Compression, GzipRoundtrip) {
     std::string src(1000, 'a');  // highly compressible
     std::string compressed;

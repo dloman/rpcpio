@@ -6,12 +6,12 @@
 #include <string_view>
 #include <vector>
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 // ── Message compression registry ─────────────────────────────────────────────
 //
 // Mandatory: identity (pass-through, always available).
-// Optional:  gzip (requires zlib linkage; controlled by ASIO_GRPC_ENABLE_GZIP).
+// Optional:  gzip (requires zlib linkage; controlled by RPCPIO_ENABLE_GZIP).
 //
 // Design rules:
 //   - Never advertise an encoding that is not compiled in.
@@ -46,4 +46,4 @@ bool Decompress(Encoding enc,
                 std::string& out,
                 std::size_t  max_output_size = 4 * 1024 * 1024);
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "asio_grpc/status.h"
+#include "rpcpio/status.h"
 
-using namespace asio_grpc;
+using namespace rpcpio;
 
 // ── StatusCode ────────────────────────────────────────────────────────────────
 

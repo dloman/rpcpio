@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-namespace asio_grpc {
+namespace rpcpio {
 
 // Compile-time descriptor for one unary RPC method.
 // Instances are typically constexpr static members of a generated Stub class.
@@ -22,4 +22,4 @@ struct UnaryMethod {
     const std::string_view path;  // "/fully.qualified.Service/MethodName"
 };
 
-} // namespace asio_grpc
+} // namespace rpcpio

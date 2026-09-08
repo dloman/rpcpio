@@ -20,12 +20,12 @@ cc_fuzz_test(
     name = "percent_decoder_fuzz",
     srcs = ["percent_decoder_fuzz.cc"],
     copts = ["-std=c++20"],
-    deps = ["//include:asio_grpc_hdrs"],
+    deps = ["//include:rpcpio_hdrs"],
 )
 
 cc_fuzz_test(
     name = "base64_metadata_fuzz",
     srcs = ["base64_metadata_fuzz.cc"],
     copts = ["-std=c++20"],
-    deps = ["//include:asio_grpc_hdrs"],
+    deps = ["//include:rpcpio_hdrs"],
 )

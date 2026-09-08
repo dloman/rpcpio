@@ -1,16 +1,16 @@
-// Greeter server — demonstrates asio_grpc unary RPC server.
+// Greeter server — demonstrates rpcpio unary RPC server.
 // No gRPC Core libraries or headers are used.
 
 #include <iostream>
 #include <memory>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
-#include "helloworld.asio_grpc.pb.h"
+#include "helloworld.rpcpio.pb.h"
 
 class GreeterServiceImpl final : public helloworld::GreeterService {
 public:
-    boost::asio::awaitable<asio_grpc::StatusOr<helloworld::HelloReply>>
-    SayHello(asio_grpc::ServerContext&        ctx,
+    boost::asio::awaitable<rpcpio::StatusOr<helloworld::HelloReply>>
+    SayHello(rpcpio::ServerContext&        ctx,
              const helloworld::HelloRequest&  request) override
     {
         (void)ctx;
@@ -27,11 +27,11 @@ int main(int argc, char* argv[]) {
 
     boost::asio::io_context ioc;
 
-    asio_grpc::ServerOptions opts;
+    rpcpio::ServerOptions opts;
     opts.use_h2c      = true;   // plaintext for the example
     opts.num_threads  = 4;
 
-    asio_grpc::Server server(ioc, opts);
+    rpcpio::Server server(ioc, opts);
 
     GreeterServiceImpl service;
     service.Register(server);

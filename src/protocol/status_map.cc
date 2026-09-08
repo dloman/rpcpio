@@ -4,7 +4,7 @@
 #include <boost/asio/error.hpp>
 #include <cerrno>
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 StatusCode NgHttp2ErrToStatusCode(int err) noexcept {
     switch (err) {
@@ -83,4 +83,4 @@ StatusCode AsioErrorToStatusCode(int ec_value, bool is_connection) noexcept {
     return StatusCode::INTERNAL;
 }
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

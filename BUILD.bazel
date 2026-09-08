@@ -4,18 +4,18 @@ package(default_visibility = ["//visibility:public"])
 
 # Convenience alias: everything a consumer needs to write gRPC services/stubs.
 alias(
-    name = "asio_grpc",
-    actual = "//src:asio_grpc",
+    name = "rpcpio",
+    actual = "//src:rpcpio",
 )
 
 # Runtime-only (no codegen); useful when protos are generated externally.
 alias(
-    name = "asio_grpc_runtime",
-    actual = "//src:asio_grpc_runtime",
+    name = "rpcpio_runtime",
+    actual = "//src:rpcpio_runtime",
 )
 
 # The protoc plugin binary.
 alias(
-    name = "asio_grpc_cpp_plugin",
-    actual = "//compiler:asio_grpc_cpp_plugin",
+    name = "rpcpio_cpp_plugin",
+    actual = "//compiler:rpcpio_cpp_plugin",
 )

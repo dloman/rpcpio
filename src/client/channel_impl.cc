@@ -8,7 +8,7 @@
 #include "src/protocol/status_map.h"
 #include "src/protocol/timeout.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 ChannelImpl::ChannelImpl(boost::asio::io_context& ioc,
                          std::string              host,
@@ -253,14 +253,14 @@ void ChannelImpl::SubmitCall(std::string                         path,
     call->ArmTimer();
 }
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal
 
 // ── Channel public API ───────────────────────────────────────────────────────
 
-#include "asio_grpc/channel.h"
+#include "rpcpio/channel.h"
 #include <boost/asio/async_result.hpp>
 
-namespace asio_grpc {
+namespace rpcpio {
 
 Channel::Channel(boost::asio::io_context& ioc,
                  std::string              host,
@@ -310,4 +310,4 @@ Channel::UnaryCallRaw(std::string_view path,
         boost::asio::use_awaitable);
 }
 
-} // namespace asio_grpc
+} // namespace rpcpio

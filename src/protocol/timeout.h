@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 // ── grpc-timeout header encoding/decoding ────────────────────────────────────
 //
@@ -29,4 +29,4 @@ std::string FormatTimeout(std::chrono::nanoseconds duration);
 // Returns nullopt on parse error or overflow.
 std::optional<std::chrono::nanoseconds> ParseTimeout(std::string_view s);
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

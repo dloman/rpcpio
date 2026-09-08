@@ -7,7 +7,7 @@
 #include "src/protocol/metadata_codec.h"
 #include "src/protocol/status_map.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 ServerImpl::ServerImpl(boost::asio::io_context& ioc, ServerOptions opts)
     : ioc_(ioc)
@@ -160,13 +160,13 @@ void ServerImpl::HandleRequest(
     state->Start();
 }
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal
 
 // ── Server public API ────────────────────────────────────────────────────────
 
-#include "asio_grpc/server.h"
+#include "rpcpio/server.h"
 
-namespace asio_grpc {
+namespace rpcpio {
 
 Server::Server(boost::asio::io_context& ioc, ServerOptions opts)
     : impl_(std::make_shared<internal::ServerImpl>(ioc, std::move(opts)))
@@ -194,4 +194,4 @@ void Server::Wait() {
     impl_->Wait();
 }
 
-} // namespace asio_grpc
+} // namespace rpcpio

@@ -1,4 +1,4 @@
-// Hello World service — example for asio_grpc.
+// Hello World service — example for rpcpio.
 // No gRPC Core headers or libraries are used.
 
 syntax = "proto3";

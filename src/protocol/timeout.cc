@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 // Maximum digit count per spec.
 static constexpr int kMaxDigits = 8;
@@ -71,4 +71,4 @@ std::optional<std::chrono::nanoseconds> ParseTimeout(std::string_view s) {
     return std::chrono::nanoseconds{static_cast<std::int64_t>(val * ns_per)};
 }
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

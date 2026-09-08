@@ -4,7 +4,7 @@
 #include "src/protocol/framing.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    asio_grpc::protocol::FrameDecoder dec(4 * 1024 * 1024);
+    rpcpio::protocol::FrameDecoder dec(4 * 1024 * 1024);
 
     // Feed in variable-size chunks to exercise all split boundaries.
     std::string_view input{reinterpret_cast<const char*>(data), size};

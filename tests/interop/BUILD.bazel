@@ -15,33 +15,33 @@ cc_proto_library(
 )
 
 genrule(
-    name = "grpc_testing_asio_grpc_gen",
+    name = "grpc_testing_rpcpio_gen",
     srcs = ["grpc_testing.proto"],
     outs = [
-        "grpc_testing.asio_grpc.pb.h",
-        "grpc_testing.asio_grpc.pb.cc",
+        "grpc_testing.rpcpio.pb.h",
+        "grpc_testing.rpcpio.pb.cc",
     ],
     cmd = """
         $(location @protobuf//:protoc) \
-            --plugin=protoc-gen-asio-grpc=$(location //:asio_grpc_cpp_plugin) \
-            --asio-grpc_out=$(RULEDIR) \
+            --plugin=protoc-gen-rpcpio=$(location //:rpcpio_cpp_plugin) \
+            --rpcpio_out=$(RULEDIR) \
             -I$$(dirname $(location grpc_testing.proto)) \
             $(location grpc_testing.proto)
     """,
     tools = [
         "@protobuf//:protoc",
-        "//:asio_grpc_cpp_plugin",
+        "//:rpcpio_cpp_plugin",
     ],
 )
 
 cc_library(
-    name = "grpc_testing_asio_grpc",
-    srcs = [":grpc_testing_asio_grpc_gen"],
-    hdrs = ["grpc_testing.asio_grpc.pb.h"],
+    name = "grpc_testing_rpcpio",
+    srcs = [":grpc_testing_rpcpio_gen"],
+    hdrs = ["grpc_testing.rpcpio.pb.h"],
     copts = ["-std=c++20"],
     deps = [
         ":grpc_testing_cc_proto",
-        "//:asio_grpc_runtime",
+        "//:rpcpio_runtime",
     ],
 )
 
@@ -50,7 +50,7 @@ cc_test(
     srcs = ["interop_client_test.cc"],
     copts = ["-std=c++20"],
     deps = [
-        ":grpc_testing_asio_grpc",
+        ":grpc_testing_rpcpio",
         "@googletest//:gtest_main",
     ],
     # Set TEST_SERVER_HOST and TEST_SERVER_PORT env vars to point at a server.
@@ -62,7 +62,7 @@ cc_test(
     srcs = ["interop_server_test.cc"],
     copts = ["-std=c++20"],
     deps = [
-        ":grpc_testing_asio_grpc",
+        ":grpc_testing_rpcpio",
         "@googletest//:gtest_main",
     ],
     tags = ["requires-network"],

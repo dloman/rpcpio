@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "src/protocol/timeout.h"
 
-using namespace asio_grpc::protocol;
+using namespace rpcpio::protocol;
 using namespace std::chrono_literals;
 
 // ── FormatTimeout ─────────────────────────────────────────────────────────────

@@ -8,12 +8,12 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <nghttp2/asio_http2_server.h>
-#include "asio_grpc/server_context.h"
-#include "asio_grpc/status.h"
+#include "rpcpio/server_context.h"
+#include "rpcpio/status.h"
 #include "src/protocol/compression.h"
 #include "src/protocol/framing.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 // Type-erased RPC handler: receives raw request bytes, fills raw response bytes.
 using RawHandler = std::function<
@@ -60,4 +60,4 @@ private:
     bool                             responded_{false};
 };
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal

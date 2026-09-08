@@ -6,9 +6,9 @@
 #include <google/protobuf/compiler/plugin.pb.h>
 #include <google/protobuf/io/zero_copy_stream.h>
 
-namespace asio_grpc {
+namespace rpcpio {
 
-// Generate the .asio_grpc.pb.h and .asio_grpc.pb.cc files for all services
+// Generate the .rpcpio.pb.h and .rpcpio.pb.cc files for all services
 // in a FileDescriptor that has no streaming methods.
 //
 // Emits a precise, source-located error for any streaming method found and
@@ -26,11 +26,11 @@ public:
 // ── Helpers (also used in tests) ─────────────────────────────────────────────
 
 struct GeneratedHeader {
-    std::string content;  // content of the .asio_grpc.pb.h file
+    std::string content;  // content of the .rpcpio.pb.h file
 };
 
 struct GeneratedSource {
-    std::string content;  // content of the .asio_grpc.pb.cc file
+    std::string content;  // content of the .rpcpio.pb.cc file
 };
 
 // Generate header content for a single file.
@@ -56,4 +56,4 @@ std::string PackageToNamespace(const std::string& package);
 //      "/helloworld.Greeter/SayHello"
 std::string MethodPath(const google::protobuf::MethodDescriptor* method);
 
-} // namespace asio_grpc
+} // namespace rpcpio

@@ -3,10 +3,10 @@
 #include <chrono>
 #include <string>
 #include <boost/asio/cancellation_signal.hpp>
-#include "asio_grpc/metadata.h"
-#include "asio_grpc/status.h"
+#include "rpcpio/metadata.h"
+#include "rpcpio/status.h"
 
-namespace asio_grpc {
+namespace rpcpio {
 
 // Forward declaration for the friend relationship.
 namespace internal { class ServerCallState; }
@@ -68,4 +68,4 @@ private:
     boost::asio::cancellation_signal cancel_signal_;
 };
 
-} // namespace asio_grpc
+} // namespace rpcpio

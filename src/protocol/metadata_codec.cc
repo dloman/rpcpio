@@ -2,9 +2,9 @@
 
 #include <cstdint>
 #include <string>
-#include "asio_grpc/metadata.h"
+#include "rpcpio/metadata.h"
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 namespace {
 
@@ -159,4 +159,4 @@ void BuildTrailers(const Status&                    status,
     MetadataToNghttp2Headers(trailing_metadata, out);
 }
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

@@ -1,7 +1,7 @@
 # Phase 1: nghttp2-asio Trailer and GOAWAY Extensions
 
 This document specifies the public API additions to the CESNET/nghttp2-asio
-library that are required before `asio_grpc` can function as a gRPC transport.
+library that are required before `rpcpio` can function as a gRPC transport.
 These changes are published as a successor BCR module version
 (`nghttp2-asio@0.0.90-20260225-464f056` → next version).
 
@@ -101,7 +101,7 @@ When the first (and only) HEADERS frame carries `END_STREAM` and also contains
 3. Signal DATA EOF (empty body) so that `on_data` is called with `len=0`.
 4. Deliver `on_close`.
 
-This order ensures that `asio_grpc::internal::ClientCallState::Attach()`
+This order ensures that `rpcpio::internal::ClientCallState::Attach()`
 can detect the trailers-only case by checking for `grpc-status` in the
 initial HEADERS block.
 
@@ -187,7 +187,7 @@ case NGHTTP2_GOAWAY: {
 }
 ```
 
-`asio_grpc` uses `on_goaway` in `ChannelImpl` to:
+`rpcpio` uses `on_goaway` in `ChannelImpl` to:
 1. Mark the channel as failing.
 2. Complete streams above `last_stream_id` with `UNAVAILABLE`.
 3. Complete streams at or below `last_stream_id` based on whether trailers

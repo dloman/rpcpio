@@ -1,10 +1,10 @@
 #pragma once
 
 #include <string>
-#include "asio_grpc/metadata.h"
-#include "asio_grpc/status.h"
+#include "rpcpio/metadata.h"
+#include "rpcpio/status.h"
 
-namespace asio_grpc::internal {
+namespace rpcpio::internal {
 
 // Type-erased result of a single unary RPC call on the wire.
 // The response is held as serialized protobuf bytes so that Channel::UnaryCall
@@ -16,4 +16,4 @@ struct UnaryResultRaw {
     MetadataMap trailing_metadata;
 };
 
-} // namespace asio_grpc::internal
+} // namespace rpcpio::internal

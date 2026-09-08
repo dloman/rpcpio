@@ -1,4 +1,4 @@
-// Greeter client — demonstrates asio_grpc unary RPC client.
+// Greeter client — demonstrates rpcpio unary RPC client.
 // No gRPC Core libraries or headers are used.
 
 #include <iostream>
@@ -6,7 +6,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
-#include "helloworld.asio_grpc.pb.h"
+#include "helloworld.rpcpio.pb.h"
 
 static boost::asio::awaitable<void>
 RunGreeter(boost::asio::io_context& ioc,
@@ -14,18 +14,18 @@ RunGreeter(boost::asio::io_context& ioc,
            std::uint16_t            target_port,
            const std::string&       name)
 {
-    asio_grpc::ChannelOptions opts;
+    rpcpio::ChannelOptions opts;
     opts.use_h2c      = true;   // plaintext for the example
     opts.verify_peer  = false;
 
-    auto channel = std::make_shared<asio_grpc::Channel>(ioc, target_host, target_port, opts);
+    auto channel = std::make_shared<rpcpio::Channel>(ioc, target_host, target_port, opts);
 
     helloworld::GreeterStub stub(channel);
 
     helloworld::HelloRequest request;
     request.set_name(name);
 
-    asio_grpc::ClientContext ctx;
+    rpcpio::ClientContext ctx;
 
     auto result = co_await stub.SayHello(ctx, request);
 

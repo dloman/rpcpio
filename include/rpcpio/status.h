@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-namespace asio_grpc {
+namespace rpcpio {
 
 // ── StatusCode ────────────────────────────────────────────────────────────────
 
@@ -171,4 +171,4 @@ struct UnaryResult {
     std::multimap<std::string, std::string> trailing_metadata;
 };
 
-} // namespace asio_grpc
+} // namespace rpcpio

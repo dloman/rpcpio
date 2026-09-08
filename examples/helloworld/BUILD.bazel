@@ -14,36 +14,36 @@ cc_proto_library(
     deps = [":helloworld_proto"],
 )
 
-# Run asio_grpc_cpp_plugin to generate typed bindings.
+# Run rpcpio_cpp_plugin to generate typed bindings.
 genrule(
-    name = "helloworld_asio_grpc_gen",
+    name = "helloworld_rpcpio_gen",
     srcs = ["helloworld.proto"],
     outs = [
-        "helloworld.asio_grpc.pb.h",
-        "helloworld.asio_grpc.pb.cc",
+        "helloworld.rpcpio.pb.h",
+        "helloworld.rpcpio.pb.cc",
     ],
     cmd = """
         $(location @protobuf//:protoc) \
-            --plugin=protoc-gen-asio-grpc=$(location //:asio_grpc_cpp_plugin) \
-            --asio-grpc_out=$(RULEDIR) \
+            --plugin=protoc-gen-rpcpio=$(location //:rpcpio_cpp_plugin) \
+            --rpcpio_out=$(RULEDIR) \
             -I$$(dirname $(location helloworld.proto)) \
             $(location helloworld.proto)
     """,
     tools = [
         "@protobuf//:protoc",
-        "//:asio_grpc_cpp_plugin",
+        "//:rpcpio_cpp_plugin",
     ],
 )
 
-# Generated asio_grpc bindings library.
+# Generated rpcpio bindings library.
 cc_library(
-    name = "helloworld_asio_grpc",
-    srcs = [":helloworld_asio_grpc_gen"],
-    hdrs = ["helloworld.asio_grpc.pb.h"],
+    name = "helloworld_rpcpio",
+    srcs = [":helloworld_rpcpio_gen"],
+    hdrs = ["helloworld.rpcpio.pb.h"],
     copts = ["-std=c++20"],
     deps = [
         ":helloworld_cc_proto",
-        "//:asio_grpc_runtime",
+        "//:rpcpio_runtime",
     ],
 )
 
@@ -52,7 +52,7 @@ cc_binary(
     name = "greeter_server",
     srcs = ["greeter_server.cc"],
     copts = ["-std=c++20"],
-    deps = [":helloworld_asio_grpc"],
+    deps = [":helloworld_rpcpio"],
 )
 
 # Client binary
@@ -60,5 +60,5 @@ cc_binary(
     name = "greeter_client",
     srcs = ["greeter_client.cc"],
     copts = ["-std=c++20"],
-    deps = [":helloworld_asio_grpc"],
+    deps = [":helloworld_rpcpio"],
 )

@@ -4,7 +4,7 @@
 #include <cstring>
 #include <limits>
 
-namespace asio_grpc::protocol {
+namespace rpcpio::protocol {
 
 // ── Encoder ──────────────────────────────────────────────────────────────────
 
@@ -116,4 +116,4 @@ void FrameDecoder::MarkEos() {
     SetError("stream ended with incomplete message");
 }
 
-} // namespace asio_grpc::protocol
+} // namespace rpcpio::protocol

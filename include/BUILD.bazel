@@ -1,8 +1,8 @@
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
-    name = "asio_grpc_hdrs",
-    hdrs = glob(["asio_grpc/**/*.h"]),
+    name = "rpcpio_hdrs",
+    hdrs = glob(["rpcpio/**/*.h"]),
     strip_include_prefix = "/include",
     deps = [
         "@nghttp2-asio//:nghttp2_asio",
