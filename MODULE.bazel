@@ -11,7 +11,7 @@ module(
 #   • Boost 1.87 (Asio, Thread, DateTime)
 #   • libnghttp2 1.65.0
 #   • OpenSSL 3.5.5
-bazel_dep(name = "nghttp2-asio", version = "0.0.90-20260225-464f056")
+bazel_dep(name = "nghttp2-asio", version = "0.0.91")
 bazel_dep(name = "boost.asio", version = "1.90.0.bcr.1")
 
 # ── Protobuf runtime and compiler ────────────────────────────────────────────
