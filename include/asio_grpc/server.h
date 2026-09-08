@@ -74,8 +74,13 @@ public:
             });
     }
 
-    // Bind and start accepting connections on host:port.
+    // Bind and start accepting connections on host:port.  Pass port=0 to let
+    // the OS pick an ephemeral port; call bound_port() afterward to learn it.
     void Start(std::string host, std::uint16_t port);
+
+    // Returns the port the server is actually listening on.
+    // Valid only after a successful Start() call.
+    std::uint16_t bound_port() const noexcept;
 
     // Graceful shutdown: stop accepting, drain active calls, join workers.
     void Shutdown();

@@ -1,6 +1,7 @@
 #include "server_impl.h"
 #include "call_state.h"
 
+#include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <nghttp2/asio_http2_server.h>
 #include "src/protocol/metadata_codec.h"
@@ -22,7 +23,23 @@ void ServerImpl::RegisterUnaryRaw(std::string_view path, RawHandler handler) {
     handlers_[std::string(path)] = std::move(handler);
 }
 
+std::uint16_t ServerImpl::ResolvePort(std::uint16_t port) {
+    if (port != 0) return port;
+    // Briefly bind an acceptor on port 0 so the OS picks an ephemeral port.
+    // There is a small TOCTOU window between close() and listen_and_serve();
+    // this is acceptable for test environments.
+    boost::asio::ip::tcp::acceptor tmp(ioc_);
+    tmp.open(boost::asio::ip::tcp::v4());
+    tmp.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+    tmp.bind(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0));
+    const std::uint16_t chosen = tmp.local_endpoint().port();
+    tmp.close();
+    return chosen;
+}
+
 void ServerImpl::Start(std::string host, std::uint16_t port) {
+    port = ResolvePort(port);
+    bound_port_ = port;
     auto self = this;
 
     // Register a catch-all handler; dispatch per-path inside.
@@ -163,6 +180,10 @@ void Server::RegisterUnaryRaw(std::string_view path, RawHandler handler) {
 
 void Server::Start(std::string host, std::uint16_t port) {
     impl_->Start(std::move(host), port);
+}
+
+std::uint16_t Server::bound_port() const noexcept {
+    return impl_->bound_port();
 }
 
 void Server::Shutdown() {

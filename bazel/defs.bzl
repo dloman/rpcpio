@@ -3,6 +3,81 @@
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 
+# ── Private rule: run asio_grpc_cpp_plugin via protoc ────────────────────────
+
+def _asio_grpc_generate_impl(ctx):
+    proto_info = ctx.attr.proto[ProtoInfo]
+    plugin = ctx.executable.plugin
+    protoc = ctx.executable.protoc
+
+    all_hdrs = []
+    all_srcs = []
+
+    for src in proto_info.direct_sources:
+        stem = src.basename[:-len(".proto")]
+        out_h  = ctx.actions.declare_file(stem + ".asio_grpc.pb.h")
+        out_cc = ctx.actions.declare_file(stem + ".asio_grpc.pb.cc")
+        all_hdrs.append(out_h)
+        all_srcs.append(out_cc)
+
+        args = ctx.actions.args()
+        args.add("--plugin=protoc-gen-asio-grpc=" + plugin.path)
+        args.add("--asio-grpc_out=" + out_h.dirname)
+
+        # Setting --proto_path to the directory that contains this .proto file
+        # causes protoc to pass only the bare filename (e.g. "foo.proto") to the
+        # plugin, so the plugin emits "foo.asio_grpc.pb.h" directly into outdir.
+        args.add("--proto_path=" + src.dirname)
+
+        # Transitive proto paths: needed for any imports inside the .proto file
+        # (e.g. google/protobuf/empty.proto).
+        for path in proto_info.transitive_proto_path.to_list():
+            args.add("--proto_path=" + path)
+
+        args.add(src.path)
+
+        ctx.actions.run(
+            executable = protoc,
+            arguments = [args],
+            inputs = depset(
+                direct = [src, plugin],
+                transitive = [proto_info.transitive_sources],
+            ),
+            outputs = [out_h, out_cc],
+            mnemonic = "AsioGrpcGenerate",
+            progress_message = "Generating asio_grpc bindings for " + src.basename,
+        )
+
+    return [
+        DefaultInfo(files = depset(all_hdrs + all_srcs)),
+        OutputGroupInfo(
+            hdrs = depset(all_hdrs),
+            srcs = depset(all_srcs),
+        ),
+    ]
+
+_asio_grpc_generate = rule(
+    implementation = _asio_grpc_generate_impl,
+    attrs = {
+        "proto": attr.label(
+            providers = [ProtoInfo],
+            mandatory = True,
+        ),
+        "plugin": attr.label(
+            executable = True,
+            cfg = "exec",
+            default = Label("//:asio_grpc_cpp_plugin"),
+        ),
+        "protoc": attr.label(
+            executable = True,
+            cfg = "exec",
+            default = Label("@protobuf//:protoc"),
+        ),
+    },
+)
+
+# ── Public macros ─────────────────────────────────────────────────────────────
+
 def asio_grpc_library(
         name,
         proto,
@@ -12,55 +87,56 @@ def asio_grpc_library(
     """Generate asio_grpc typed stub + service for a proto_library target.
 
     Creates:
-      <name>_proto       — proto_library (if proto is a string label, reused)
-      <name>_cc_proto    — cc_proto_library for the message classes
-      <name>             — cc_library with both message classes and asio_grpc bindings
+      <name>_cc_proto   — cc_proto_library for the message classes
+      <name>_gen        — rule that runs asio_grpc_cpp_plugin via protoc
+      <name>_gen_hdrs   — filegroup selecting only the generated headers
+      <name>_gen_srcs   — filegroup selecting only the generated sources
+      <name>            — cc_library combining everything
 
     Args:
       name:       Name for the generated cc_library target.
-      proto:      Label of a proto_library target containing the service definitions.
-      deps:       Additional cc_library deps for the generated library.
-      visibility: Bazel visibility list (default: current package).
-      **kwargs:   Extra arguments forwarded to the inner cc_library.
+      proto:      Label of a proto_library target.
+      deps:       Additional cc_library deps.
+      visibility: Bazel visibility list.
+      **kwargs:   Extra arguments forwarded to cc_library.
     """
-    proto_label = proto
     cc_proto_name = name + "_cc_proto"
+    gen_name      = name + "_gen"
+    gen_hdrs_name = gen_name + "_hdrs"
+    gen_srcs_name = gen_name + "_srcs"
 
-    # Generate the protobuf C++ message classes.
     cc_proto_library(
         name = cc_proto_name,
-        deps = [proto_label],
-        visibility = visibility or ["//visibility:private"],
-    )
-
-    # Run asio_grpc_cpp_plugin via protoc to produce .asio_grpc.pb.{h,cc}.
-    generated_srcs_name = name + "_generated_srcs"
-    native.genrule(
-        name = generated_srcs_name,
-        srcs = [proto_label],
-        outs = [
-            # The output file names mirror the proto file names.
-            # This genrule assumes one .proto file per asio_grpc_library call.
-            # Multiple-proto cases require explicit outs.
-        ],
-        # Use a custom tool invocation via protoc.
-        cmd = """
-            $(location @protobuf//:protoc) \
-                --plugin=protoc-gen-asio-grpc=$(location //:asio_grpc_cpp_plugin) \
-                --asio-grpc_out=$(RULEDIR) \
-                -I$(GENDIR) \
-                $(SRCS)
-        """,
-        tools = [
-            "@protobuf//:protoc",
-            "//:asio_grpc_cpp_plugin",
-        ],
+        deps = [proto],
         visibility = ["//visibility:private"],
     )
 
-    # Full library combining the message classes and asio_grpc bindings.
+    _asio_grpc_generate(
+        name = gen_name,
+        proto = proto,
+        visibility = ["//visibility:private"],
+    )
+
+    # Separate header and source output groups so cc_library gets the right
+    # files in hdrs (public) vs srcs (compiled, not re-exported).
+    native.filegroup(
+        name = gen_hdrs_name,
+        srcs = [":" + gen_name],
+        output_group = "hdrs",
+        visibility = ["//visibility:private"],
+    )
+
+    native.filegroup(
+        name = gen_srcs_name,
+        srcs = [":" + gen_name],
+        output_group = "srcs",
+        visibility = ["//visibility:private"],
+    )
+
     native.cc_library(
         name = name,
+        srcs = [":" + gen_srcs_name],
+        hdrs = [":" + gen_hdrs_name],
         deps = [
             ":" + cc_proto_name,
             "//:asio_grpc_runtime",
