@@ -1,0 +1,59 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+
+package(default_visibility = ["//visibility:private"])
+
+proto_library(
+    name = "counter_proto",
+    srcs = ["counter.proto"],
+)
+
+cc_proto_library(
+    name = "counter_cc_proto",
+    deps = [":counter_proto"],
+)
+
+genrule(
+    name = "counter_rpcpio_gen",
+    srcs = ["counter.proto"],
+    outs = [
+        "counter.rpcpio.pb.h",
+        "counter.rpcpio.pb.cc",
+    ],
+    cmd = """
+        $(location @protobuf//:protoc) \
+            --plugin=protoc-gen-rpcpio=$(location //:rpcpio_cpp_plugin) \
+            --rpcpio_out=$(RULEDIR) \
+            -I$$(dirname $(location counter.proto)) \
+            $(location counter.proto)
+    """,
+    tools = [
+        "@protobuf//:protoc",
+        "//:rpcpio_cpp_plugin",
+    ],
+)
+
+cc_library(
+    name = "counter_rpcpio",
+    srcs = [":counter_rpcpio_gen"],
+    hdrs = ["counter.rpcpio.pb.h"],
+    copts = ["-std=c++20"],
+    deps = [
+        ":counter_cc_proto",
+        "//:rpcpio_runtime",
+    ],
+)
+
+cc_binary(
+    name = "streaming_server",
+    srcs = ["streaming_server.cc"],
+    copts = ["-std=c++20"],
+    deps = [":counter_rpcpio"],
+)
+
+cc_binary(
+    name = "streaming_client",
+    srcs = ["streaming_client.cc"],
+    copts = ["-std=c++20"],
+    deps = [":counter_rpcpio"],
+)

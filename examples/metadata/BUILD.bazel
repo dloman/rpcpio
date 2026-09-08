@@ -1,0 +1,59 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+
+package(default_visibility = ["//visibility:private"])
+
+proto_library(
+    name = "echo_proto",
+    srcs = ["echo.proto"],
+)
+
+cc_proto_library(
+    name = "echo_cc_proto",
+    deps = [":echo_proto"],
+)
+
+genrule(
+    name = "echo_rpcpio_gen",
+    srcs = ["echo.proto"],
+    outs = [
+        "echo.rpcpio.pb.h",
+        "echo.rpcpio.pb.cc",
+    ],
+    cmd = """
+        $(location @protobuf//:protoc) \
+            --plugin=protoc-gen-rpcpio=$(location //:rpcpio_cpp_plugin) \
+            --rpcpio_out=$(RULEDIR) \
+            -I$$(dirname $(location echo.proto)) \
+            $(location echo.proto)
+    """,
+    tools = [
+        "@protobuf//:protoc",
+        "//:rpcpio_cpp_plugin",
+    ],
+)
+
+cc_library(
+    name = "echo_rpcpio",
+    srcs = [":echo_rpcpio_gen"],
+    hdrs = ["echo.rpcpio.pb.h"],
+    copts = ["-std=c++20"],
+    deps = [
+        ":echo_cc_proto",
+        "//:rpcpio_runtime",
+    ],
+)
+
+cc_binary(
+    name = "metadata_server",
+    srcs = ["metadata_server.cc"],
+    copts = ["-std=c++20"],
+    deps = [":echo_rpcpio"],
+)
+
+cc_binary(
+    name = "metadata_client",
+    srcs = ["metadata_client.cc"],
+    copts = ["-std=c++20"],
+    deps = [":echo_rpcpio"],
+)

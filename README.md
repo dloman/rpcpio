@@ -126,7 +126,10 @@ bazel/               Starlark rule (_rpcpio_generate) and macros
 tests/unit/          GoogleTest unit tests
 tests/fuzz/          libFuzzer fuzz targets
 tests/interop/       gRPC interop test client and server
-examples/helloworld/ End-to-end helloworld (client + server)
+examples/helloworld/ Unary RPC — basic greeter (client + server)
+examples/streaming/  Server-streaming, client-streaming, and bidi-streaming
+examples/deadline/   Setting a client deadline; handling DEADLINE_EXCEEDED
+examples/metadata/   Sending and receiving custom call metadata
 docs/                Wire protocol, concurrency model, compatibility matrix
 ```
 

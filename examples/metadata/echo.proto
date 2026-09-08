@@ -1,0 +1,14 @@
+// Echo service — demonstrates client/server metadata exchange in rpcpio.
+
+syntax = "proto3";
+
+package echomd;
+
+option cc_enable_arenas = true;
+
+service EchoService {
+    rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+message EchoRequest  { string message = 1; }
+message EchoResponse { string message = 1; }

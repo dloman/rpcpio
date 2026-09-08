@@ -1,0 +1,26 @@
+// Counter service — demonstrates all three streaming RPC patterns in rpcpio.
+
+syntax = "proto3";
+
+package counter;
+
+option cc_enable_arenas = true;
+
+service CounterService {
+    // Server-streaming: emit start, start-1, ..., 1 then finish.
+    rpc CountDown(CountRequest) returns (stream CountResponse);
+
+    // Client-streaming: send integers, receive their sum.
+    rpc Sum(stream SumRequest) returns (SumResponse);
+
+    // Bidi-streaming: echo each message back prefixed with "echo: ".
+    rpc Chat(stream ChatMessage) returns (stream ChatMessage);
+}
+
+message CountRequest  { int32 start = 1; }
+message CountResponse { int32 value = 1; }
+
+message SumRequest    { int32 value = 1; }
+message SumResponse   { int32 total = 1; }
+
+message ChatMessage   { string text = 1; }
