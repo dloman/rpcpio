@@ -8,7 +8,7 @@ module(
 # ── Core transport ────────────────────────────────────────────────────────────
 # Provides @nghttp2-asio//:nghttp2_asio, which bundles:
 #   • dloman/nghttp2-asio (with external io_context, trailers, and GOAWAY)
-#   • Boost 1.87 (Asio, Thread, DateTime)
+#   • Boost 1.90 (Asio, Thread, DateTime)
 #   • libnghttp2 1.65.0
 #   • OpenSSL 3.5.5
 bazel_dep(name = "nghttp2-asio", version = "0.0.91")
