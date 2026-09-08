@@ -1,6 +1,7 @@
 #include "timeout.h"
 
 #include <cstdint>
+#include <iterator>
 #include <limits>
 
 namespace rpcpio::protocol {
@@ -9,8 +10,8 @@ namespace rpcpio::protocol {
 static constexpr int kMaxDigits = 8;
 static constexpr std::uint64_t kMaxTimeoutValue = 99999999ULL; // 8 nines
 
-// Choose the coarsest unit that fits in 8 digits and rounds ceiling.
-// Order: H > M > S > m > u > n  (coarsest first).
+// Preserve the finest available precision while using an exact coarser unit
+// for values that divide cleanly.
 std::string FormatTimeout(std::chrono::nanoseconds duration) {
     if (duration.count() <= 0) return {};
 
@@ -18,23 +19,27 @@ std::string FormatTimeout(std::chrono::nanoseconds duration) {
 
     struct Unit { const char* sym; std::uint64_t ns_per; };
     static constexpr Unit kUnits[] = {
-        { "H", 3'600'000'000'000ULL },
-        { "M",    60'000'000'000ULL },
-        { "S",     1'000'000'000ULL },
-        { "m",         1'000'000ULL },
-        { "u",             1'000ULL },
         { "n",                 1ULL },
+        { "u",             1'000ULL },
+        { "m",         1'000'000ULL },
+        { "S",     1'000'000'000ULL },
+        { "M",    60'000'000'000ULL },
+        { "H", 3'600'000'000'000ULL },
     };
 
-    for (auto& u : kUnits) {
+    for (std::size_t i = 0; i < std::size(kUnits); ++i) {
+        const Unit& u = kUnits[i];
         // Ceiling division: val = ceil(ns / ns_per)
         std::uint64_t val = (ns + u.ns_per - 1) / u.ns_per;
         if (val <= kMaxTimeoutValue) {
+            const bool has_coarser_unit = i + 1 < std::size(kUnits);
+            if (has_coarser_unit && ns % kUnits[i + 1].ns_per == 0) {
+                continue;
+            }
             return std::to_string(val) + u.sym;
         }
     }
-    // Fallback: emit max nanoseconds (shouldn't be reached with valid input).
-    return std::to_string(kMaxTimeoutValue) + "n";
+    return std::to_string(kMaxTimeoutValue) + "H";
 }
 
 std::optional<std::chrono::nanoseconds> ParseTimeout(std::string_view s) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -8,56 +9,80 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <nghttp2/asio_http2_server.h>
+#include "rpcpio/server.h"
 #include "rpcpio/server_context.h"
 #include "rpcpio/status.h"
+#include "rpcpio/unary_server_reply.h"
 #include "src/protocol/compression.h"
 #include "src/protocol/framing.h"
 
 namespace rpcpio::internal {
 
-// Type-erased RPC handler: receives raw request bytes, fills raw response bytes.
 using RawHandler = std::function<
     boost::asio::awaitable<Status>(
         ServerContext&, std::string_view, std::string&)>;
 
-// Manages one inbound unary call.  Created for each HTTP/2 stream that passes
-// basic gRPC validation.  Lifetime is tied to the nghttp2-asio request/response
-// pair; it must not outlive the server session.
 class ServerCallState : public std::enable_shared_from_this<ServerCallState> {
 public:
     ServerCallState(boost::asio::io_context&              ioc,
+                    ServerImpl*                           server,
                     const nghttp2::asio_http2::server::request&  req,
                     const nghttp2::asio_http2::server::response& resp,
-                    RawHandler                            handler,
+                    RawHandler                            coroutine_handler,
                     std::size_t                           max_request_size,
                     std::size_t                           max_metadata_size);
 
-    // Begin receiving request data and, once complete, dispatch the handler.
+    ServerCallState(boost::asio::io_context&              ioc,
+                    ServerImpl*                           server,
+                    const nghttp2::asio_http2::server::request&  req,
+                    const nghttp2::asio_http2::server::response& resp,
+                    UnaryCallbackHandler                  callback_handler,
+                    std::size_t                           max_request_size,
+                    std::size_t                           max_metadata_size);
+
     void Start();
+
+    // Exactly-once reply entry point (any executor).
+    void FinishFromReply(Status              status,
+                         std::string         response_bytes,
+                         MetadataMap         initial_metadata,
+                         MetadataMap         trailing_metadata);
+
+    [[nodiscard]] bool finished() const noexcept {
+        return responded_.load(std::memory_order_acquire);
+    }
+
+    // Server shutdown or peer closure before a reply was sent.
+    void CancelDueToShutdown(Status status);
+    void CancelDueToPeerClose();
 
 private:
     void OnData(const uint8_t* data, std::size_t len);
     void OnRequestEnd();
-    void SendError(Status status);
+    void DispatchCoroutineHandler(std::string req_bytes);
+    void DispatchCallbackHandler(std::string req_bytes);
 
-    // Sends HTTP 200 + initial headers, then DATA (via generator callback),
-    // then writes trailing HEADERS with END_STREAM via write_trailer.
+    bool TryMarkResponded();
+    void SendError(Status status);
     void SendResponse(const Status& status, std::string_view resp_bytes,
                       const MetadataMap& initial_meta,
                       const MetadataMap& trailing_meta);
 
     boost::asio::io_context&                       ioc_;
+    ServerImpl*                                    server_;
     const nghttp2::asio_http2::server::request&    req_;
     const nghttp2::asio_http2::server::response&   resp_;
-    RawHandler                                     handler_;
+    RawHandler                                     coroutine_handler_;
+    UnaryCallbackHandler                           callback_handler_;
     std::size_t                                    max_request_size_;
     std::size_t                                    max_metadata_size_;
 
     protocol::FrameDecoder           decoder_;
-    std::optional<protocol::Encoding> request_encoding_;  // from grpc-encoding header
+    std::optional<protocol::Encoding> request_encoding_;
     ServerContext                    ctx_;
     boost::asio::steady_timer        timer_;
-    bool                             responded_{false};
+    std::atomic<bool>                responded_{false};
+    std::atomic<bool>                closed_{false};
 };
 
 } // namespace rpcpio::internal

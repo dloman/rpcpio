@@ -1,56 +1,45 @@
 #include "call_state.h"
 
-#include <boost/asio/post.hpp>
 #include "src/protocol/compression.h"
 #include "src/protocol/metadata_codec.h"
 #include "src/protocol/status_map.h"
+#include "rpcpio/status.h"
 
 namespace rpcpio::internal {
 
-ClientCallState::ClientCallState(boost::asio::io_context& ioc,
-                                  ClientContext*           ctx,
-                                  CompletionCb             cb)
+ClientCallState::ClientCallState(
+        boost::asio::io_context&                    ioc,
+        std::shared_ptr<UnaryCallSubmission>        submission,
+        std::size_t                                 max_receive_message_size)
     : ioc_(ioc)
-    , ctx_(ctx)
-    , completion_(std::move(cb))
-    , timer_(ioc)
-    , decoder_(ctx ? ctx->max_receive_message_size() : 4 * 1024 * 1024)
+    , submission_(std::move(submission))
+    , max_receive_message_size_(max_receive_message_size)
+    , decoder_(max_receive_message_size)
 {}
 
-void ClientCallState::ArmTimer() {
-    if (!ctx_ || !ctx_->has_deadline()) return;
+void ClientCallState::BindRequest(
+        const nghttp2::asio_http2::client::request* req) {
+    request_ = req;
+}
 
-    auto dl = ctx_->deadline();
-    if (!dl) return;
-
-    timer_.expires_at(*dl);
-    auto self = shared_from_this();
-    timer_.async_wait([self](const boost::system::error_code& ec) {
-        if (ec == boost::asio::error::operation_aborted) return;
-        self->Complete(UnaryResultRaw{
-            Status{StatusCode::DEADLINE_EXCEEDED, "deadline exceeded"}});
-    });
+void ClientCallState::ResetStream() {
+    if (request_) request_->cancel(NGHTTP2_CANCEL);
 }
 
 void ClientCallState::Complete(UnaryResultRaw result) {
-    if (completed_.exchange(true)) return;
-    timer_.cancel();
-    auto cb = std::move(completion_);
-    boost::asio::post(ioc_, [cb = std::move(cb), r = std::move(result)]() mutable {
-        cb(std::move(r));
-    });
+    ResetStream();
+    if (submission_) {
+        submission_->Complete(std::move(result));
+        submission_.reset();
+    }
 }
 
 void ClientCallState::Fail(Status status) {
     Complete(UnaryResultRaw{std::move(status)});
 }
 
-void ClientCallState::Cancel() {
-    Complete(UnaryResultRaw{Status{StatusCode::CANCELLED, "call cancelled"}});
-}
-
 void ClientCallState::OnStreamClose(uint32_t error_code) {
-    if (completed_) return;
+    if (submission_ && submission_->completed()) return;
     if (!trailers_done_) {
         if (error_code == 0) {
             Complete(UnaryResultRaw{Status{StatusCode::UNKNOWN, "missing grpc-status"}});
@@ -63,12 +52,12 @@ void ClientCallState::OnStreamClose(uint32_t error_code) {
 }
 
 void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) {
+    if (submission_ && submission_->completed()) return;
+
     int http_status = resp.status_code();
 
-    // Extract initial metadata (application headers only).
     protocol::Nghttp2HeadersToMetadata(resp.header(), result_.initial_metadata);
 
-    // Check content-type.
     auto ct_it = resp.header().find("content-type");
     bool is_grpc = ct_it != resp.header().end() &&
                    ct_it->second.value.find("application/grpc") != std::string::npos;
@@ -85,8 +74,6 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
         return;
     }
 
-    // Parse content-encoding for the response body.  Unknown encoding causes
-    // UNIMPLEMENTED; identity (or absent header) means no decompression needed.
     {
         auto enc_it = resp.header().find("grpc-encoding");
         if (enc_it != resp.header().end() &&
@@ -102,7 +89,6 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
         }
     }
 
-    // Trailers-only: grpc-status in the initial HEADERS block.
     if (resp.header().count("grpc-status")) {
         result_.status = protocol::ExtractTrailerStatus(resp.header());
         protocol::Nghttp2HeadersToMetadata(resp.header(), result_.trailing_metadata);
@@ -115,7 +101,7 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
     auto self = shared_from_this();
 
     resp.on_data([self](const uint8_t* data, std::size_t len) {
-        if (self->completed_) return;
+        if (self->submission_ && self->submission_->completed()) return;
         if (len == 0) {
             self->decoder_.MarkEos();
             if (self->decoder_.error()) {
@@ -133,9 +119,8 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
         }
     });
 
-    // on_trailers is the Phase-1 extension to the CESNET nghttp2-asio API.
     resp.on_trailers([self](const nghttp2::asio_http2::header_map& trailers) {
-        if (self->completed_) return;
+        if (self->submission_ && self->submission_->completed()) return;
         self->trailers_done_ = true;
 
         self->result_.status = protocol::ExtractTrailerStatus(trailers);
@@ -146,22 +131,21 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
             return;
         }
 
-        // Collect the raw (possibly compressed) payload from the decoder.
-        std::string_view raw_payload;
-        if (self->decoder_.done()) {
-            raw_payload = self->decoder_.payload();
+        if (!self->decoder_.done()) {
+            self->Complete(UnaryResultRaw{
+                Status{StatusCode::INTERNAL, "missing unary response message"}});
+            return;
         }
+        self->result_.has_response = true;
+        const std::string_view raw_payload = self->decoder_.payload();
 
-        // Decompress if the server signalled a non-identity encoding.
         if (self->response_encoding_ &&
             *self->response_encoding_ != protocol::Encoding::kIdentity &&
             self->decoder_.compress_flag() != 0) {
-            const std::size_t max_size = self->ctx_
-                ? self->ctx_->max_receive_message_size()
-                : 4 * 1024 * 1024;
             std::string decompressed;
             if (!protocol::Decompress(*self->response_encoding_,
-                                      raw_payload, decompressed, max_size)) {
+                                      raw_payload, decompressed,
+                                      self->max_receive_message_size_)) {
                 self->Complete(UnaryResultRaw{Status{
                     StatusCode::INTERNAL, "response decompression failed"}});
                 return;

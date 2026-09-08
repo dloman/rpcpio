@@ -1,5 +1,6 @@
 #include "channel_impl.h"
 #include "call_state.h"
+#include "unary_call_submission.h"
 #include "server_streaming_call_state.h"
 #include "client_streaming_call_state.h"
 #include "bidi_streaming_call_state.h"
@@ -16,6 +17,19 @@
 #include "src/protocol/timeout.h"
 
 namespace rpcpio::internal {
+
+namespace {
+
+std::string RequestUri(
+        const std::string& host,
+        std::uint16_t port,
+        bool use_tls,
+        std::string_view path) {
+    return std::string(use_tls ? "https://" : "http://")
+        + host + ":" + std::to_string(port) + std::string(path);
+}
+
+} // namespace
 
 ChannelImpl::ChannelImpl(boost::asio::io_context& ioc,
                          std::string              host,
@@ -165,6 +179,16 @@ void ChannelImpl::OnConnected(boost::system::error_code ec) {
     DrainQueue(ec);
 }
 
+void ChannelImpl::ErasePendingSubmission(
+        const std::shared_ptr<UnaryCallSubmission>& submission) {
+    pending_calls_.erase(
+        std::remove_if(pending_calls_.begin(), pending_calls_.end(),
+            [&submission](const PendingCall& pending) {
+                return pending.submission == submission;
+            }),
+        pending_calls_.end());
+}
+
 void ChannelImpl::DrainQueue(boost::system::error_code ec) {
     auto waiters = std::move(connect_waiters_);
     for (auto& w : waiters) w(ec);
@@ -175,98 +199,82 @@ void ChannelImpl::DrainQueue(boost::system::error_code ec) {
         return;
     }
     auto pending = std::move(pending_calls_);
-    for (auto& p : pending)
-        SubmitCall(std::move(p.path), p.ctx,
-                   std::move(p.request_bytes), std::move(p.completion));
-
-    auto generic_pending = std::move(pending_generic_calls_);
-    for (auto& fn : generic_pending) fn();
+    for (auto& p : pending) {
+        if (!p.submission || p.submission->completed()) continue;
+        SubmitCallReady(std::move(p));
+    }
 }
 
 void ChannelImpl::FailAll(Status status) {
     auto pending = std::move(pending_calls_);
-    for (auto& p : pending)
-        p.completion(UnaryResultRaw{status});
+    for (auto& p : pending) {
+        if (p.submission) p.submission->Complete(UnaryResultRaw{status});
+    }
 
     auto generic_pending = std::move(pending_generic_calls_);
     for (auto& fn : generic_pending) fn();
 }
 
-void ChannelImpl::SubmitCall(std::string                         path,
-                              ClientContext*                      ctx,
-                              std::string                         req_bytes,
-                              std::function<void(UnaryResultRaw)> completion) {
-    auto self = shared_from_this();
-    if (state_ == ConnState::kIdle || state_ == ConnState::kConnecting) {
-        pending_calls_.push_back({std::move(path), ctx,
-                                   std::move(req_bytes), std::move(completion)});
-        if (state_ == ConnState::kIdle) {
-            state_ = ConnState::kConnecting;
-            DoConnect();
-        }
-        return;
-    }
-    if (state_ == ConnState::kFailed) {
-        completion(UnaryResultRaw{
-            Status{StatusCode::UNAVAILABLE, "channel failed"}});
-        return;
-    }
+void ChannelImpl::SubmitCallReady(PendingCall pending) {
+    if (!pending.submission || pending.submission->completed()) return;
 
-    // Build request headers.
     nghttp2::asio_http2::header_map hdrs;
     hdrs.emplace("content-type",
         nghttp2::asio_http2::header_value{"application/grpc+proto", false});
     hdrs.emplace("te",
         nghttp2::asio_http2::header_value{"trailers", false});
-    hdrs.emplace(":authority",
-        nghttp2::asio_http2::header_value{host_, false});
     hdrs.emplace("user-agent",
         nghttp2::asio_http2::header_value{opts_.user_agent, false});
 
-    if (ctx && ctx->has_deadline()) {
-        auto d = ctx->deadline_from_now();
-        if (d.count() <= 0) {
-            completion(UnaryResultRaw{
-                Status{StatusCode::DEADLINE_EXCEEDED, "deadline already passed"}});
-            return;
+    protocol::MetadataToNghttp2Headers(pending.send_metadata, hdrs);
+
+    if (pending.deadline) {
+        const auto remaining = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            *pending.deadline - std::chrono::system_clock::now());
+        if (remaining.count() > 0) {
+            auto ts = protocol::FormatTimeout(remaining);
+            if (!ts.empty()) {
+                hdrs.emplace("grpc-timeout",
+                    nghttp2::asio_http2::header_value{ts, false});
+            }
         }
-        auto ts = protocol::FormatTimeout(d);
-        if (!ts.empty())
-            hdrs.emplace("grpc-timeout",
-                nghttp2::asio_http2::header_value{ts, false});
     }
 
-    if (ctx && ctx->compression_algorithm() != "identity") {
+    if (pending.compression_algorithm != "identity") {
         hdrs.emplace("grpc-encoding",
-            nghttp2::asio_http2::header_value{ctx->compression_algorithm(), false});
+            nghttp2::asio_http2::header_value{pending.compression_algorithm, false});
     }
 
-    if (ctx)
-        protocol::MetadataToNghttp2Headers(ctx->send_metadata(), hdrs);
-
-    // Encode gRPC LPM frame.
     std::string frame;
-    if (!protocol::EncodeFrame(0, req_bytes, frame)) {
-        completion(UnaryResultRaw{
+    if (!protocol::EncodeFrame(0, pending.request_bytes, frame)) {
+        pending.submission->Complete(UnaryResultRaw{
             Status{StatusCode::RESOURCE_EXHAUSTED, "request too large"}});
         return;
     }
 
-    // Create the per-call state before submit to avoid a race.
-    auto call = std::make_shared<ClientCallState>(ioc_, ctx, std::move(completion));
+    const std::size_t max_recv = opts_.max_receive_message_size;
+    auto call = std::make_shared<ClientCallState>(
+        ioc_, pending.submission, max_recv);
 
     boost::system::error_code ec;
-    auto req = session_->submit(ec, "POST", std::string{path}, frame, hdrs);
+    auto req = session_->submit(
+        ec,
+        "POST",
+        RequestUri(host_, port_, opts_.use_tls && !opts_.use_h2c, pending.path),
+        frame,
+        hdrs);
     if (ec) {
         call->Fail(Status{protocol::AsioErrorToStatusCode(ec.value(), false),
                           "stream submit failed: " + ec.message()});
         return;
     }
 
-    // Track this call so OnGoaway can fail it if the peer did not accept it.
+    call->BindRequest(req);
+
     const auto stream_id = static_cast<std::int32_t>(req->stream_id());
     active_calls_.emplace(stream_id, call);
 
+    auto self = shared_from_this();
     req->on_response([call](const nghttp2::asio_http2::client::response& resp) {
         call->Attach(resp);
     });
@@ -274,15 +282,61 @@ void ChannelImpl::SubmitCall(std::string                         path,
         self->RemoveActiveCall(stream_id);
         call->OnStreamClose(error_code);
     });
+}
 
-    call->ArmTimer();
+void ChannelImpl::SubmitCall(std::string                         path,
+                              ClientContext*                      ctx,
+                              std::string                         req_bytes,
+                              std::function<void(UnaryResultRaw)> completion,
+                              boost::asio::cancellation_slot      handler_slot) {
+    auto self = shared_from_this();
+
+    auto submission = std::make_shared<UnaryCallSubmission>(
+        ioc_, std::move(completion));
+    submission->ArmDeadline(ctx ? ctx->deadline() : std::nullopt);
+    submission->WireCancellation(handler_slot);
+    if (ctx) submission->WireCancellation(ctx->cancellation_slot());
+
+    if (ctx && ctx->has_deadline() && ctx->deadline_from_now().count() <= 0) {
+        submission->Complete(UnaryResultRaw{
+            Status{StatusCode::DEADLINE_EXCEEDED, "deadline already passed"}});
+        return;
+    }
+    if (submission->completed()) return;
+
+    PendingCall pending{
+        std::move(path),
+        std::move(req_bytes),
+        ctx ? ctx->send_metadata() : MetadataMap{},
+        ctx ? ctx->compression_algorithm() : "identity",
+        ctx ? ctx->deadline() : std::nullopt,
+        submission,
+    };
+
+    if (state_ == ConnState::kIdle || state_ == ConnState::kConnecting) {
+        submission->SetPendingCleanup([self, submission]() {
+            self->ErasePendingSubmission(submission);
+        });
+        pending_calls_.push_back(std::move(pending));
+        if (state_ == ConnState::kIdle) {
+            state_ = ConnState::kConnecting;
+            DoConnect();
+        }
+        return;
+    }
+    if (state_ == ConnState::kFailed) {
+        submission->Complete(UnaryResultRaw{
+            Status{StatusCode::UNAVAILABLE, "channel failed"}});
+        return;
+    }
+
+    SubmitCallReady(std::move(pending));
 }
 
 // ── Shared header-builder helper ──────────────────────────────────────────────
 // Returns true on success, false if the deadline has already passed.
 // On false, out_err is set to the deadline-exceeded status.
 static bool BuildStreamingGrpcHeaders(
-        const std::string&               host,
         const ChannelOptions&            opts,
         ClientContext*                   ctx,
         nghttp2::asio_http2::header_map& hdrs,
@@ -292,8 +346,6 @@ static bool BuildStreamingGrpcHeaders(
         nghttp2::asio_http2::header_value{"application/grpc+proto", false});
     hdrs.emplace("te",
         nghttp2::asio_http2::header_value{"trailers", false});
-    hdrs.emplace(":authority",
-        nghttp2::asio_http2::header_value{host, false});
     hdrs.emplace("user-agent",
         nghttp2::asio_http2::header_value{opts.user_agent, false});
 
@@ -354,7 +406,7 @@ void ChannelImpl::SubmitServerStreamingCall(
     nghttp2::asio_http2::header_map hdrs;
     {
         Status err;
-        if (!BuildStreamingGrpcHeaders(host_, opts_, ctx, hdrs, err)) {
+        if (!BuildStreamingGrpcHeaders(opts_, ctx, hdrs, err)) {
             auto call = std::make_shared<ServerStreamingClientCallState>(ioc_, ctx);
             call->Fail(std::move(err));
             completion(call->TakeReader());
@@ -374,7 +426,12 @@ void ChannelImpl::SubmitServerStreamingCall(
     auto call = std::make_shared<ServerStreamingClientCallState>(ioc_, ctx);
 
     boost::system::error_code ec;
-    auto req = session_->submit(ec, "POST", std::string{path}, frame, hdrs);
+    auto req = session_->submit(
+        ec,
+        "POST",
+        RequestUri(host_, port_, opts_.use_tls && !opts_.use_h2c, path),
+        frame,
+        hdrs);
     if (ec) {
         call->Fail(Status{protocol::AsioErrorToStatusCode(ec.value(), false),
                           "stream submit failed: " + ec.message()});
@@ -413,8 +470,7 @@ static ssize_t ClientWriterGenerator(
             *flags = NGHTTP2_DATA_FLAG_EOF;
             return 0;
         }
-        *flags = NGHTTP2_DATA_FLAG_DEFERRED;
-        return 0;
+        return NGHTTP2_ERR_DEFERRED;
     }
     auto& front = impl->pending_.front();
     const std::size_t remaining = front.size() - impl->offset_;
@@ -458,7 +514,7 @@ void ChannelImpl::SubmitClientStreamingCall(
     nghttp2::asio_http2::header_map hdrs;
     {
         Status err;
-        if (!BuildStreamingGrpcHeaders(host_, opts_, ctx, hdrs, err)) {
+        if (!BuildStreamingGrpcHeaders(opts_, ctx, hdrs, err)) {
             auto call = std::make_shared<ClientStreamingClientCallState>(ioc_, ctx);
             call->Fail(std::move(err));
             completion(call->TakeWriter());
@@ -472,7 +528,8 @@ void ChannelImpl::SubmitClientStreamingCall(
     // Submit with a generator callback that drains writer_impl->pending_.
     boost::system::error_code ec;
     auto req = session_->submit(
-        ec, "POST", std::string{path},
+        ec, "POST",
+        RequestUri(host_, port_, opts_.use_tls && !opts_.use_h2c, path),
         [writer_impl](uint8_t* buf, std::size_t len, uint32_t* flags) mutable
                 -> ssize_t {
             return ClientWriterGenerator(writer_impl.get(), buf, len, flags);
@@ -537,7 +594,7 @@ void ChannelImpl::SubmitBidiStreamingCall(
     nghttp2::asio_http2::header_map hdrs;
     {
         Status err;
-        if (!BuildStreamingGrpcHeaders(host_, opts_, ctx, hdrs, err)) {
+        if (!BuildStreamingGrpcHeaders(opts_, ctx, hdrs, err)) {
             auto call = std::make_shared<BidiStreamingClientCallState>(ioc_, ctx);
             call->Fail(std::move(err));
             completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
@@ -550,7 +607,8 @@ void ChannelImpl::SubmitBidiStreamingCall(
 
     boost::system::error_code ec;
     auto req = session_->submit(
-        ec, "POST", std::string{path},
+        ec, "POST",
+        RequestUri(host_, port_, opts_.use_tls && !opts_.use_h2c, path),
         [writer_impl](uint8_t* buf, std::size_t len, uint32_t* flags) mutable
                 -> ssize_t {
             return ClientWriterGenerator(writer_impl.get(), buf, len, flags);
@@ -600,42 +658,36 @@ Channel::Channel(boost::asio::io_context& ioc,
 
 Channel::~Channel() = default;
 
+void Channel::AsyncUnaryCallRawImpl(
+        std::string path,
+        ClientContext* ctx,
+        std::string request_bytes,
+        std::function<void(UnaryResultRaw)> completion,
+        boost::asio::cancellation_slot cancellation_slot) {
+    impl_->SubmitCall(
+        std::move(path),
+        ctx,
+        std::move(request_bytes),
+        std::move(completion),
+        cancellation_slot);
+}
+
 boost::asio::awaitable<void> Channel::Connect() {
     auto impl = impl_;
+    boost::asio::use_awaitable_t<> token;
     co_await boost::asio::async_initiate<
         boost::asio::use_awaitable_t<>,
         void(boost::system::error_code)>(
         [impl](auto handler) {
-            impl->Connect([h = std::move(handler)](
+            auto shared_handler =
+                std::make_shared<std::decay_t<decltype(handler)>>(
+                    std::move(handler));
+            impl->Connect([shared_handler](
                     boost::system::error_code ec) mutable {
-                std::move(h)(ec);
+                std::move(*shared_handler)(ec);
             });
         },
-        boost::asio::use_awaitable);
-}
-
-boost::asio::awaitable<internal::UnaryResultRaw>
-Channel::UnaryCallRaw(std::string_view path,
-                      ClientContext&   ctx,
-                      std::string_view req_bytes)
-{
-    auto impl   = impl_;
-    std::string path_str{path};
-    std::string req_str{req_bytes};
-
-    co_return co_await boost::asio::async_initiate<
-        boost::asio::use_awaitable_t<>,
-        void(internal::UnaryResultRaw)>(
-        [impl, path_str, req_str, &ctx](auto handler) mutable {
-            impl->SubmitCall(
-                std::move(path_str),
-                &ctx,
-                std::move(req_str),
-                [h = std::move(handler)](internal::UnaryResultRaw r) mutable {
-                    std::move(h)(std::move(r));
-                });
-        },
-        boost::asio::use_awaitable);
+        token);
 }
 
 boost::asio::awaitable<internal::RawClientReader>
@@ -646,20 +698,24 @@ Channel::ServerStreamingCallRaw(std::string_view path,
     auto impl     = impl_;
     std::string path_str{path};
     std::string req_str{req_bytes};
+    boost::asio::use_awaitable_t<> token;
 
     co_return co_await boost::asio::async_initiate<
         boost::asio::use_awaitable_t<>,
         void(internal::RawClientReader)>(
         [impl, path_str, req_str, &ctx](auto handler) mutable {
+            auto shared_handler =
+                std::make_shared<std::decay_t<decltype(handler)>>(
+                    std::move(handler));
             impl->SubmitServerStreamingCall(
                 std::move(path_str),
                 &ctx,
                 std::move(req_str),
-                [h = std::move(handler)](internal::RawClientReader r) mutable {
-                    std::move(h)(std::move(r));
+                [shared_handler](internal::RawClientReader reader) mutable {
+                    std::move(*shared_handler)(std::move(reader));
                 });
         },
-        boost::asio::use_awaitable);
+        token);
 }
 
 boost::asio::awaitable<internal::RawClientWriter>
@@ -668,19 +724,23 @@ Channel::ClientStreamingCallRaw(std::string_view path,
 {
     auto impl     = impl_;
     std::string path_str{path};
+    boost::asio::use_awaitable_t<> token;
 
     co_return co_await boost::asio::async_initiate<
         boost::asio::use_awaitable_t<>,
         void(internal::RawClientWriter)>(
         [impl, path_str, &ctx](auto handler) mutable {
+            auto shared_handler =
+                std::make_shared<std::decay_t<decltype(handler)>>(
+                    std::move(handler));
             impl->SubmitClientStreamingCall(
                 std::move(path_str),
                 &ctx,
-                [h = std::move(handler)](internal::RawClientWriter w) mutable {
-                    std::move(h)(std::move(w));
+                [shared_handler](internal::RawClientWriter writer) mutable {
+                    std::move(*shared_handler)(std::move(writer));
                 });
         },
-        boost::asio::use_awaitable);
+        token);
 }
 
 boost::asio::awaitable<Channel::RawBidiHandles>
@@ -689,21 +749,25 @@ Channel::BidiStreamingCallRaw(std::string_view path,
 {
     auto impl     = impl_;
     std::string path_str{path};
+    boost::asio::use_awaitable_t<> token;
 
     co_return co_await boost::asio::async_initiate<
         boost::asio::use_awaitable_t<>,
         void(Channel::RawBidiHandles)>(
         [impl, path_str, &ctx](auto handler) mutable {
+            auto shared_handler =
+                std::make_shared<std::decay_t<decltype(handler)>>(
+                    std::move(handler));
             impl->SubmitBidiStreamingCall(
                 std::move(path_str),
                 &ctx,
-                [h = std::move(handler)](
+                [shared_handler](
                         internal::ChannelImpl::BidiHandles bh) mutable {
-                    std::move(h)(Channel::RawBidiHandles{
+                    std::move(*shared_handler)(Channel::RawBidiHandles{
                         std::move(bh.reader), std::move(bh.writer)});
                 });
         },
-        boost::asio::use_awaitable);
+        token);
 }
 
 } // namespace rpcpio

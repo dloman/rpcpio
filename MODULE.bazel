@@ -2,15 +2,17 @@ module(
     name = "rpcpio",
     version = "0.1.0",
     compatibility_level = 1,
+    bazel_compatibility = [">=8.7.0"],
 )
 
 # ── Core transport ────────────────────────────────────────────────────────────
 # Provides @nghttp2-asio//:nghttp2_asio, which bundles:
-#   • CESNET/nghttp2-asio (with trailer + GOAWAY extensions)
-#   • Boost 1.90 (Asio, Thread, DateTime)
+#   • dloman/nghttp2-asio (with external io_context, trailers, and GOAWAY)
+#   • Boost 1.87 (Asio, Thread, DateTime)
 #   • libnghttp2 1.65.0
 #   • OpenSSL 3.5.5
 bazel_dep(name = "nghttp2-asio", version = "0.0.90-20260225-464f056")
+bazel_dep(name = "boost.asio", version = "1.90.0.bcr.1")
 
 # ── Protobuf runtime and compiler ────────────────────────────────────────────
 bazel_dep(name = "protobuf", version = "27.3")

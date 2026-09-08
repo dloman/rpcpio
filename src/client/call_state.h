@@ -1,61 +1,47 @@
 #pragma once
 
 #include <atomic>
-#include <functional>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
 #include <boost/asio/io_context.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <nghttp2/asio_http2_client.h>
-#include "rpcpio/client_context.h"
-#include "rpcpio/internal/raw_result.h"
+#include <nghttp2/nghttp2.h>
+#include "rpcpio/unary_result_raw.h"
+#include "src/client/unary_call_submission.h"
 #include "src/protocol/compression.h"
 #include "src/protocol/framing.h"
 #include "src/protocol/metadata_codec.h"
 
 namespace rpcpio::internal {
 
-// Manages the complete lifecycle of one unary RPC from the client side.
-// Created when a stream is submitted; destroyed once the completion fires.
-// All methods must be called from the session's io_context executor.
 class ClientCallState : public std::enable_shared_from_this<ClientCallState> {
 public:
-    using CompletionCb = std::function<void(UnaryResultRaw)>;
+    ClientCallState(boost::asio::io_context&                    ioc,
+                    std::shared_ptr<UnaryCallSubmission>        submission,
+                    std::size_t                                 max_receive_message_size);
 
-    ClientCallState(boost::asio::io_context& ioc,
-                    ClientContext*           ctx,
-                    CompletionCb             cb);
-
-    // Called by ChannelImpl with the response object returned by session.submit().
     void Attach(const nghttp2::asio_http2::client::response& resp);
+    void BindRequest(const nghttp2::asio_http2::client::request* req);
 
-    // Arm the deadline timer (call once, after Attach).
-    void ArmTimer();
-
-    // Externally-triggered cancellation (e.g. ClientContext::Cancel()).
-    void Cancel();
-
-    // Called by ChannelImpl's on_close lambda when the stream closes.
     void OnStreamClose(uint32_t error_code);
-
-    // Complete with an error status (called externally, e.g. on submit failure).
     void Fail(Status status);
 
 private:
-    // Internal single-fire completion gate; posts cb to ioc_.
     void Complete(UnaryResultRaw result);
+    void ResetStream();
 
-    boost::asio::io_context&    ioc_;
-    ClientContext*              ctx_;
-    CompletionCb                completion_;
-    boost::asio::steady_timer   timer_;
+    boost::asio::io_context&                    ioc_;
+    std::shared_ptr<UnaryCallSubmission>        submission_;
+    std::size_t                                 max_receive_message_size_;
+
+    const nghttp2::asio_http2::client::request* request_{nullptr};
 
     protocol::FrameDecoder           decoder_;
     UnaryResultRaw                   result_;
-    std::optional<protocol::Encoding> response_encoding_;  // from grpc-encoding header
+    std::optional<protocol::Encoding> response_encoding_;
 
-    std::atomic<bool>           completed_{false};
     bool                        initial_meta_done_{false};
     bool                        trailers_done_{false};
 };

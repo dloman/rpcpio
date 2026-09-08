@@ -11,6 +11,10 @@ namespace rpcpio {
 
 class ClientContext {
 public:
+    // Per-call state.  Must remain valid until the completion handler for
+    // Channel::AsyncUnaryCallRaw / UnaryCall runs; the transport copies
+    // deadline, metadata, and compression preference at submission time and
+    // does not retain a ClientContext pointer after completion.
     ClientContext() = default;
     ~ClientContext() = default;
 
@@ -52,6 +56,8 @@ public:
 
     // ── Cancellation ──────────────────────────────────────────────────────────
 
+    // During an active AsyncUnaryCallRaw the transport may assign to this slot.
+    // Prefer ClientContext::Cancel() or the completion token's cancellation slot.
     boost::asio::cancellation_slot cancellation_slot() {
         return cancel_signal_.slot();
     }

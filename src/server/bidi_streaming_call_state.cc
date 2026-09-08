@@ -174,8 +174,7 @@ void BidiStreamingCallState::SendHeaders() {
                     impl->resp_.write_trailer(impl->trail_hdrs_);
                     return 0;
                 }
-                *data_flags = NGHTTP2_DATA_FLAG_DEFERRED;
-                return 0;
+                return NGHTTP2_ERR_DEFERRED;
             }
 
             auto& front = impl->pending_.front();

@@ -65,7 +65,12 @@ void FrameDecoder::TryParseHeader() {
 
     payload_.clear();
     payload_.reserve(payload_len_);
-    state_ = State::kAwaitingPayload;
+    if (payload_len_ == 0) {
+        has_message_ = true;
+        state_ = State::kDone;
+    } else {
+        state_ = State::kAwaitingPayload;
+    }
 }
 
 void FrameDecoder::Feed(std::string_view chunk) {

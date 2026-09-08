@@ -3,8 +3,8 @@
 
 #include <iostream>
 #include <memory>
-#include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
+#include "rpcpio/standalone_server.h"
 #include "helloworld.rpcpio.pb.h"
 
 class GreeterServiceImpl final : public helloworld::GreeterService {
@@ -25,26 +25,19 @@ int main(int argc, char* argv[]) {
     std::uint16_t port = 50051;
     if (argc >= 2) port = static_cast<std::uint16_t>(std::stoi(argv[1]));
 
-    boost::asio::io_context ioc;
-
     rpcpio::ServerOptions opts;
-    opts.use_h2c      = true;   // plaintext for the example
-    opts.num_threads  = 4;
+    opts.use_h2c     = true;
+    opts.num_threads = 4;
 
-    rpcpio::Server server(ioc, opts);
+    rpcpio::StandaloneServer standalone(opts);
 
     GreeterServiceImpl service;
-    service.Register(server);
+    service.Register(standalone.server());
 
-    server.Start(host, port);
-    std::cout << "Greeter server listening on " << host << ":" << port << "\n";
+    standalone.Start(host, port);
+    std::cout << "Greeter server listening on " << host << ":"
+              << standalone.bound_port() << "\n";
 
-    // Wait for SIGINT/SIGTERM.
-    boost::asio::signal_set signals(ioc, SIGINT, SIGTERM);
-    signals.async_wait([&](const boost::system::error_code&, int) {
-        server.Shutdown();
-    });
-
-    server.Wait();
+    standalone.Wait();
     return 0;
 }

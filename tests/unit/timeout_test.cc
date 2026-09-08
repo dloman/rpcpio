@@ -39,12 +39,7 @@ TEST(FormatTimeout, Hours) {
 }
 
 TEST(FormatTimeout, RoundsOutward) {
-    // 1001 nanoseconds should not be shortened to 1 microsecond.
-    auto result = FormatTimeout(1001ns);
-    // Should be 1001n (fits in 8 digits as nanoseconds) or 2u (ceiling microseconds).
-    // 1001 ns ceiling to microseconds = 2 us.  Our code picks coarsest unit.
-    // ceil(1001/1000) = 2, 2 <= 99999999 → "2u"
-    EXPECT_EQ(result, "2u");
+    EXPECT_EQ(FormatTimeout(1001ns), "1001n");
 }
 
 TEST(FormatTimeout, MaxDigitsNanoseconds) {

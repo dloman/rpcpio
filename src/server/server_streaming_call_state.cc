@@ -188,8 +188,7 @@ void ServerStreamingCallState::SendHeaders() {
                     return 0;
                 }
                 // No data yet and not finished — defer until resume() wakes us.
-                *data_flags = NGHTTP2_DATA_FLAG_DEFERRED;
-                return 0;
+                return NGHTTP2_ERR_DEFERRED;
             }
 
             // Drain as much of the front frame as fits in buf.

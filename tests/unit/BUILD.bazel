@@ -1,6 +1,16 @@
 package(default_visibility = ["//visibility:private"])
 
 cc_test(
+    name = "atlas_integration_test",
+    srcs = ["atlas_integration_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//:rpcpio",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "framing_test",
     srcs = ["framing_test.cc"],
     copts = ["-std=c++20"],

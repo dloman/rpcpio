@@ -5,11 +5,13 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <google/protobuf/message.h>
 #include "rpcpio/server_context.h"
 #include "rpcpio/status.h"
+#include "rpcpio/unary_server_reply.h"
 #include "rpcpio/unary_method.h"
 #include "rpcpio/streaming_method.h"
 #include "rpcpio/server_reader.h"
@@ -22,6 +24,7 @@ namespace rpcpio {
 namespace internal { class ServerImpl; }
 
 struct ServerOptions {
+    // Used only by StandaloneServer (worker thread count).
     std::uint32_t num_threads{4};
 
     // TLS (supply both cert and key to enable)
@@ -32,7 +35,8 @@ struct ServerOptions {
     // h2c plaintext (no TLS)
     bool use_h2c{false};
 
-    // Graceful shutdown: wait up to this long for active calls to finish.
+    // Graceful shutdown hint for StandaloneServer::Wait(); embedded Server::Shutdown
+    // itself is non-blocking and does not wait for active calls.
     std::chrono::seconds grace_period{30};
 
     // Per-call limits (bytes)
@@ -40,6 +44,14 @@ struct ServerOptions {
     std::size_t max_response_message_size{4 * 1024 * 1024};
     std::size_t max_metadata_size{8192};
 };
+
+// Callback-based unary handler for Atlas / stackful-yield integrations.
+// The handler may retain |reply| and call UnaryServerReply::Finish exactly once
+// from any executor; Finish dispatches to the server's io_context.
+using UnaryCallbackHandler = std::function<void(
+    ServerContext&              ctx,
+    std::string_view            request_bytes,
+    std::shared_ptr<UnaryServerReply> reply)>;
 
 class Server {
 public:
@@ -50,7 +62,6 @@ public:
     // Handler signature: awaitable<StatusOr<Resp>>(ServerContext&, const Req&)
     template<typename Req, typename Resp, typename Handler>
     void RegisterUnary(const UnaryMethod<Req, Resp>& method, Handler handler) {
-        // Wrap the typed handler in a type-erased bytes-in/bytes-out adapter.
         RegisterUnaryRaw(
             method.path,
             [h = std::move(handler)](
@@ -58,7 +69,6 @@ public:
                 std::string_view   req_bytes,
                 std::string&       resp_bytes
             ) -> boost::asio::awaitable<Status> {
-                // Deserialize request.
                 Req req;
                 if (!req.ParseFromArray(req_bytes.data(),
                                         static_cast<int>(req_bytes.size()))) {
@@ -66,11 +76,9 @@ public:
                                      "failed to parse request"};
                 }
 
-                // Invoke handler.
                 StatusOr<Resp> result = co_await h(ctx, req);
                 if (!result.ok()) co_return result.status();
 
-                // Serialize response.
                 if (!result->SerializeToString(&resp_bytes)) {
                     co_return Status{StatusCode::INTERNAL,
                                      "failed to serialize response"};
@@ -79,8 +87,11 @@ public:
             });
     }
 
+    // Register a callback unary handler (no co_spawn in the Atlas path).
+    void RegisterUnaryCallback(std::string_view path,
+                               UnaryCallbackHandler handler);
+
     // Register a server-streaming handler.
-    // Handler signature: awaitable<Status>(ServerContext&, const Req&, ServerWriter<Resp>&)
     template<typename Req, typename Resp, typename Handler>
     void RegisterServerStreaming(const ServerStreamingMethod<Req, Resp>& method,
                                   Handler handler) {
@@ -103,7 +114,6 @@ public:
     }
 
     // Register a client-streaming handler.
-    // Handler signature: awaitable<StatusOr<Resp>>(ServerContext&, ServerReader<Req>&)
     template<typename Req, typename Resp, typename Handler>
     void RegisterClientStreaming(const ClientStreamingMethod<Req, Resp>& method,
                                   Handler handler) {
@@ -126,7 +136,6 @@ public:
     }
 
     // Register a bidirectional-streaming handler.
-    // Handler signature: awaitable<Status>(ServerContext&, ServerReader<Req>&, ServerWriter<Resp>&)
     template<typename Req, typename Resp, typename Handler>
     void RegisterBidi(const BidiStreamingMethod<Req, Resp>& method,
                        Handler handler) {
@@ -145,23 +154,23 @@ public:
 
     // Bind and start accepting connections on host:port.  Pass port=0 to let
     // the OS pick an ephemeral port; call bound_port() afterward to learn it.
+    // Registers async work on |ioc| and returns immediately.
     void Start(std::string host, std::uint16_t port);
 
-    // Returns the port the server is actually listening on.
-    // Valid only after a successful Start() call.
     std::uint16_t bound_port() const noexcept;
 
-    // Graceful shutdown: stop accepting, drain active calls, join workers.
+    // Idempotent, non-blocking shutdown: stop accepting, close nghttp2 resources,
+    // and cancel active calls.  Does not run, stop, join, poll, or block on |ioc|.
     void Shutdown();
 
-    // Block the calling thread until Shutdown() completes.
+    // Deprecated for embedded use; retained for compatibility.  No-op unless
+    // StandaloneServer owns worker threads.
     void Wait();
 
     Server(const Server&)            = delete;
     Server& operator=(const Server&) = delete;
 
 private:
-    // Type-erased registrations; implemented in server_impl.cc.
     using RawHandler = std::function<
         boost::asio::awaitable<Status>(
             ServerContext&, std::string_view, std::string&)>;

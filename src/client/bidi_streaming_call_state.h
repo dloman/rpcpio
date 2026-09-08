@@ -32,7 +32,7 @@ public:
 
     // Called by ChannelImpl after submit() returns the request and response.
     // Sets req_ on writer_impl_, registers on_data and on_trailers.
-    void Attach(std::shared_ptr<nghttp2::asio_http2::client::request> req,
+    void Attach(const nghttp2::asio_http2::client::request* req,
                 const nghttp2::asio_http2::client::response&          resp);
 
     // Arm the deadline timer (call once, after Attach).

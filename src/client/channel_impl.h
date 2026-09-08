@@ -1,19 +1,22 @@
 #pragma once
 
-#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <nghttp2/asio_http2_client.h>
 #include "rpcpio/channel.h"
+#include "rpcpio/metadata.h"
 #include "rpcpio/client_context.h"
 #include "rpcpio/internal/raw_result.h"
 #include "rpcpio/internal/raw_client_reader.h"
@@ -22,6 +25,7 @@
 namespace rpcpio::internal {
 
 class ClientCallState;
+class UnaryCallSubmission;
 class ServerStreamingClientCallState;
 class ClientStreamingClientCallState;
 class BidiStreamingClientCallState;
@@ -48,7 +52,8 @@ public:
     void SubmitCall(std::string                              path,
                     ClientContext*                           ctx,
                     std::string                              request_bytes,
-                    std::function<void(UnaryResultRaw)>      completion);
+                    std::function<void(UnaryResultRaw)>      completion,
+                    boost::asio::cancellation_slot           handler_slot = {});
 
     // Submit a server-streaming call (single request, many responses).
     void SubmitServerStreamingCall(
@@ -94,10 +99,15 @@ private:
 
     struct PendingCall {
         std::string                        path;
-        ClientContext*                     ctx;
         std::string                        request_bytes;
-        std::function<void(UnaryResultRaw)> completion;
+        MetadataMap                        send_metadata;
+        std::string                        compression_algorithm;
+        std::optional<std::chrono::system_clock::time_point> deadline;
+        std::shared_ptr<UnaryCallSubmission> submission;
     };
+
+    void ErasePendingSubmission(const std::shared_ptr<UnaryCallSubmission>& submission);
+    void SubmitCallReady(PendingCall pending);
 
     boost::asio::io_context&              ioc_;
     std::string                           host_;

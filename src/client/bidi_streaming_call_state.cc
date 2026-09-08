@@ -22,10 +22,11 @@ BidiStreamingClientCallState::BidiStreamingClientCallState(
 
 void BidiStreamingClientCallState::ArmTimer() {
     if (!ctx_ || !ctx_->has_deadline()) return;
-    auto dl = ctx_->deadline();
-    if (!dl) return;
-
-    timer_.expires_at(*dl);
+    const std::chrono::nanoseconds remaining = ctx_->deadline_from_now();
+    timer_.expires_after(
+        remaining > std::chrono::nanoseconds::zero()
+            ? remaining
+            : std::chrono::nanoseconds::zero());
     auto self = shared_from_this();
     timer_.async_wait([self](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted) return;
@@ -82,10 +83,10 @@ void BidiStreamingClientCallState::MaybeDeliverStatus(Status s) {
 }
 
 void BidiStreamingClientCallState::Attach(
-        std::shared_ptr<nghttp2::asio_http2::client::request> req,
+        const nghttp2::asio_http2::client::request* req,
         const nghttp2::asio_http2::client::response&          resp)
 {
-    writer_impl_->req_ = std::move(req);
+    writer_impl_->req_ = req;
 
     // Validate content-type.
     auto ct_it = resp.header().find("content-type");

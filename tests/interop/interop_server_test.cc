@@ -105,12 +105,11 @@ class InteropServerTest : public ::testing::Test {
 protected:
     void SetUp() override {
         rpcpio::ServerOptions opts;
-        opts.use_h2c     = true;
-        opts.num_threads = 2;
+        opts.use_h2c = true;
 
         server_ = std::make_unique<rpcpio::Server>(ioc_, opts);
         service_.Register(*server_);
-        server_->Start("127.0.0.1", 0);   // OS picks ephemeral port
+        server_->Start("127.0.0.1", 0);
         port_ = server_->bound_port();
 
         thread_ = std::thread([this] { ioc_.run(); });
