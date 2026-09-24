@@ -22,6 +22,7 @@ ChannelImpl::ChannelImpl(boost::asio::io_context& ioc,
                          std::uint16_t            port,
                          ChannelOptions           opts)
     : ioc_(ioc)
+    , strand_(ioc.get_executor())
     , host_(std::move(host))
     , port_(port)
     , opts_(std::move(opts))
@@ -30,40 +31,29 @@ ChannelImpl::ChannelImpl(boost::asio::io_context& ioc,
 ChannelImpl::~ChannelImpl() = default;
 
 void ChannelImpl::Connect(std::function<void(boost::system::error_code)> cb) {
-    if (state_ == ConnState::kReady) { cb({}); return; }
-    if (state_ == ConnState::kFailed) {
-        cb(boost::system::error_code{
-            boost::asio::error::connection_refused,
-            boost::asio::error::get_system_category()});
-        return;
-    }
-    connect_waiters_.push_back(std::move(cb));
-    if (state_ == ConnState::kConnecting) return;
-    state_ = ConnState::kConnecting;
-    DoConnect();
+    boost::asio::dispatch(strand_,
+        [self = shared_from_this(), cb = std::move(cb)]() mutable {
+            if (self->state_ == ConnState::kShutdown) {
+                cb(boost::asio::error::operation_aborted);
+                return;
+            }
+            if (self->state_ == ConnState::kReady) { cb({}); return; }
+            if (self->state_ == ConnState::kFailed) {
+                cb(boost::system::error_code{
+                    boost::asio::error::connection_refused,
+                    boost::asio::error::get_system_category()});
+                return;
+            }
+            self->connect_waiters_.push_back(std::move(cb));
+            if (self->state_ == ConnState::kConnecting) return;
+            self->state_ = ConnState::kConnecting;
+            self->DoConnect();
+        });
 }
 
 void ChannelImpl::DoConnect() {
+    // Must be called from strand_.
     auto self = shared_from_this();
-
-    auto wire_session = [self](
-            std::shared_ptr<nghttp2::asio_http2::client::session> sess) {
-        sess->on_connect([self, sess](boost::asio::ip::tcp::endpoint) {
-            self->session_ = sess;
-            self->OnConnected({});
-        });
-        sess->on_error([self](const boost::system::error_code& ec) {
-            if (self->state_ != ConnState::kReady)
-                self->OnConnected(ec);
-            else
-                self->FailAll(Status{
-                    protocol::AsioErrorToStatusCode(ec.value(), true),
-                    "connection error: " + ec.message()});
-        });
-        sess->on_goaway([self](std::uint32_t ec, std::int32_t last_stream_id) {
-            self->OnGoaway(ec, last_stream_id);
-        });
-    };
 
     if (opts_.use_tls && !opts_.use_h2c) {
         // Share the SSL context so it outlives the session.
@@ -73,51 +63,144 @@ void ChannelImpl::DoConnect() {
                              boost::asio::ssl::context::no_sslv2 |
                              boost::asio::ssl::context::no_sslv3);
 
-        if (!opts_.ca_cert_file.empty())
-            ssl_ctx->load_verify_file(opts_.ca_cert_file);
-        else
-            ssl_ctx->set_default_verify_paths();
+        // Use EC-based overloads; translate failures to a connection error.
+        boost::system::error_code tls_ec;
+
+        if (!opts_.ca_cert_file.empty()) {
+            ssl_ctx->load_verify_file(opts_.ca_cert_file, tls_ec);
+        } else {
+            ssl_ctx->set_default_verify_paths(tls_ec);
+            tls_ec = {};  // non-fatal; system store may be empty
+        }
+        if (!tls_ec && !opts_.client_cert_file.empty()) {
+            ssl_ctx->use_certificate_chain_file(opts_.client_cert_file, tls_ec);
+        }
+        if (!tls_ec && !opts_.client_key_file.empty() &&
+            !opts_.client_cert_file.empty()) {
+            ssl_ctx->use_private_key_file(opts_.client_key_file,
+                                           boost::asio::ssl::context::pem, tls_ec);
+        }
+        if (tls_ec) {
+            // Surface as INVALID_ARGUMENT connection failure (already on strand).
+            OnConnected(tls_ec);
+            return;
+        }
 
         ssl_ctx->set_verify_mode(opts_.verify_peer
             ? boost::asio::ssl::verify_peer
             : boost::asio::ssl::verify_none);
-
-        if (!opts_.client_cert_file.empty()) {
-            ssl_ctx->use_certificate_chain_file(opts_.client_cert_file);
-            ssl_ctx->use_private_key_file(opts_.client_key_file,
-                                           boost::asio::ssl::context::pem);
-        }
 
         // Advertise h2 via ALPN.
         static const unsigned char kH2Alpn[] = "\x02h2";
         SSL_CTX_set_alpn_protos(ssl_ctx->native_handle(), kH2Alpn,
                                 sizeof(kH2Alpn) - 1);
 
-        // Capture ssl_ctx in the on_connect lambda to keep it alive.
+        // Create session and store in connecting_session_ before callbacks.
         auto sess = std::make_shared<nghttp2::asio_http2::client::session>(
             ioc_, *ssl_ctx, host_, std::to_string(port_));
+        connecting_session_ = sess;
+
         sess->on_connect([self, sess, ssl_ctx](
-                boost::asio::ip::tcp::endpoint) {
-            self->session_ = sess;
-            self->OnConnected({});
+                boost::asio::ip::tcp::endpoint) mutable {
+            boost::asio::post(self->strand_, [self, sess = std::move(sess)]() mutable {
+                if (self->state_ == ConnState::kShutdown) {
+                    self->connecting_session_.reset();
+                    return;
+                }
+                self->connecting_session_.reset();
+                self->session_ = std::move(sess);
+                self->OnConnected({});
+            });
         });
         sess->on_error([self](const boost::system::error_code& ec) {
-            if (self->state_ != ConnState::kReady)
-                self->OnConnected(ec);
-            else
-                self->FailAll(Status{
-                    protocol::AsioErrorToStatusCode(ec.value(), true),
-                    "connection error: " + ec.message()});
+            boost::asio::post(self->strand_, [self, ec]() {
+                if (self->state_ == ConnState::kShutdown) return;
+                if (self->state_ != ConnState::kReady)
+                    self->OnConnected(ec);
+                else
+                    self->FailAll(Status{
+                        protocol::AsioErrorToStatusCode(ec.value(), true),
+                        "connection error: " + ec.message()});
+            });
         });
         sess->on_goaway([self](std::uint32_t ec, std::int32_t last_stream_id) {
-            self->OnGoaway(ec, last_stream_id);
+            boost::asio::post(self->strand_, [self, ec, last_stream_id]() {
+                if (self->state_ == ConnState::kShutdown) return;
+                self->OnGoaway(ec, last_stream_id);
+            });
         });
     } else {
         // h2c prior-knowledge (plaintext)
         auto sess = std::make_shared<nghttp2::asio_http2::client::session>(
             ioc_, host_, std::to_string(port_));
-        wire_session(sess);
+        connecting_session_ = sess;
+
+        sess->on_connect([self, sess](boost::asio::ip::tcp::endpoint) mutable {
+            boost::asio::post(self->strand_, [self, sess = std::move(sess)]() mutable {
+                if (self->state_ == ConnState::kShutdown) {
+                    self->connecting_session_.reset();
+                    return;
+                }
+                self->connecting_session_.reset();
+                self->session_ = std::move(sess);
+                self->OnConnected({});
+            });
+        });
+        sess->on_error([self](const boost::system::error_code& ec) {
+            boost::asio::post(self->strand_, [self, ec]() {
+                if (self->state_ == ConnState::kShutdown) return;
+                if (self->state_ != ConnState::kReady)
+                    self->OnConnected(ec);
+                else
+                    self->FailAll(Status{
+                        protocol::AsioErrorToStatusCode(ec.value(), true),
+                        "connection error: " + ec.message()});
+            });
+        });
+        sess->on_goaway([self](std::uint32_t ec, std::int32_t last_stream_id) {
+            boost::asio::post(self->strand_, [self, ec, last_stream_id]() {
+                if (self->state_ == ConnState::kShutdown) return;
+                self->OnGoaway(ec, last_stream_id);
+            });
+        });
     }
+}
+
+void ChannelImpl::Shutdown() {
+    boost::asio::dispatch(strand_,
+        [self = shared_from_this()]() {
+            if (self->state_ == ConnState::kShutdown) return;  // idempotent
+            self->state_ = ConnState::kShutdown;
+
+            // Close any session being established.
+            if (self->connecting_session_) {
+                self->connecting_session_->shutdown();
+                self->connecting_session_.reset();
+            }
+            // Close any established session.
+            if (self->session_) {
+                self->session_->shutdown();
+                self->session_.reset();
+            }
+
+            // Drain connect waiters.
+            auto waiters = std::move(self->connect_waiters_);
+            for (auto& w : waiters)
+                w(boost::asio::error::operation_aborted);
+
+            // Fail active unary calls.
+            Status cancelled{StatusCode::CANCELLED, "channel shut down"};
+            for (auto& [id, call] : self->active_calls_)
+                call->Fail(cancelled);
+            self->active_calls_.clear();
+
+            // Fail active streaming calls.
+            for (auto& [id, cb] : self->active_streaming_calls_)
+                cb(cancelled);
+            self->active_streaming_calls_.clear();
+
+            self->FailAll(cancelled);
+        });
 }
 
 void ChannelImpl::OnGoaway(std::uint32_t /*error_code*/,
@@ -196,86 +279,111 @@ void ChannelImpl::SubmitCall(std::string                         path,
                               ClientContext*                      ctx,
                               std::string                         req_bytes,
                               std::function<void(UnaryResultRaw)> completion) {
-    auto self = shared_from_this();
-    if (state_ == ConnState::kIdle || state_ == ConnState::kConnecting) {
-        pending_calls_.push_back({std::move(path), ctx,
-                                   std::move(req_bytes), std::move(completion)});
-        if (state_ == ConnState::kIdle) {
-            state_ = ConnState::kConnecting;
-            DoConnect();
-        }
-        return;
-    }
-    if (state_ == ConnState::kFailed) {
-        completion(UnaryResultRaw{
-            Status{StatusCode::UNAVAILABLE, "channel failed"}});
-        return;
-    }
+    boost::asio::dispatch(strand_,
+        [self = shared_from_this(),
+         path = std::move(path),
+         ctx,
+         req_bytes  = std::move(req_bytes),
+         completion = std::move(completion)]() mutable {
+            if (self->state_ == ConnState::kShutdown) {
+                completion(UnaryResultRaw{
+                    Status{StatusCode::CANCELLED, "channel shut down"}});
+                return;
+            }
+            if (self->state_ == ConnState::kIdle ||
+                self->state_ == ConnState::kConnecting) {
+                self->pending_calls_.push_back({std::move(path), ctx,
+                                                std::move(req_bytes),
+                                                std::move(completion)});
+                if (self->state_ == ConnState::kIdle) {
+                    self->state_ = ConnState::kConnecting;
+                    self->DoConnect();
+                }
+                return;
+            }
+            if (self->state_ == ConnState::kFailed) {
+                completion(UnaryResultRaw{
+                    Status{StatusCode::UNAVAILABLE, "channel failed"}});
+                return;
+            }
 
-    // Build request headers.
-    nghttp2::asio_http2::header_map hdrs;
-    hdrs.emplace("content-type",
-        nghttp2::asio_http2::header_value{"application/grpc+proto", false});
-    hdrs.emplace("te",
-        nghttp2::asio_http2::header_value{"trailers", false});
-    hdrs.emplace(":authority",
-        nghttp2::asio_http2::header_value{host_, false});
-    hdrs.emplace("user-agent",
-        nghttp2::asio_http2::header_value{opts_.user_agent, false});
+            // Build request headers.
+            nghttp2::asio_http2::header_map hdrs;
+            hdrs.emplace("content-type",
+                nghttp2::asio_http2::header_value{"application/grpc+proto", false});
+            hdrs.emplace("te",
+                nghttp2::asio_http2::header_value{"trailers", false});
+            hdrs.emplace(":authority",
+                nghttp2::asio_http2::header_value{self->host_, false});
+            hdrs.emplace("user-agent",
+                nghttp2::asio_http2::header_value{self->opts_.user_agent, false});
 
-    if (ctx && ctx->has_deadline()) {
-        auto d = ctx->deadline_from_now();
-        if (d.count() <= 0) {
-            completion(UnaryResultRaw{
-                Status{StatusCode::DEADLINE_EXCEEDED, "deadline already passed"}});
-            return;
-        }
-        auto ts = protocol::FormatTimeout(d);
-        if (!ts.empty())
-            hdrs.emplace("grpc-timeout",
-                nghttp2::asio_http2::header_value{ts, false});
-    }
+            if (ctx && ctx->has_deadline()) {
+                auto d = ctx->deadline_from_now();
+                if (d.count() <= 0) {
+                    completion(UnaryResultRaw{
+                        Status{StatusCode::DEADLINE_EXCEEDED,
+                               "deadline already passed"}});
+                    return;
+                }
+                auto ts = protocol::FormatTimeout(d);
+                if (!ts.empty())
+                    hdrs.emplace("grpc-timeout",
+                        nghttp2::asio_http2::header_value{ts, false});
+            }
 
-    if (ctx && ctx->compression_algorithm() != "identity") {
-        hdrs.emplace("grpc-encoding",
-            nghttp2::asio_http2::header_value{ctx->compression_algorithm(), false});
-    }
+            if (ctx && ctx->compression_algorithm() != "identity") {
+                hdrs.emplace("grpc-encoding",
+                    nghttp2::asio_http2::header_value{
+                        ctx->compression_algorithm(), false});
+            }
 
-    if (ctx)
-        protocol::MetadataToNghttp2Headers(ctx->send_metadata(), hdrs);
+            if (ctx)
+                protocol::MetadataToNghttp2Headers(ctx->send_metadata(), hdrs);
 
-    // Encode gRPC LPM frame.
-    std::string frame;
-    if (!protocol::EncodeFrame(0, req_bytes, frame)) {
-        completion(UnaryResultRaw{
-            Status{StatusCode::RESOURCE_EXHAUSTED, "request too large"}});
-        return;
-    }
+            // Encode gRPC LPM frame.
+            std::string frame;
+            if (!protocol::EncodeFrame(0, req_bytes, frame)) {
+                completion(UnaryResultRaw{
+                    Status{StatusCode::RESOURCE_EXHAUSTED, "request too large"}});
+                return;
+            }
 
-    // Create the per-call state before submit to avoid a race.
-    auto call = std::make_shared<ClientCallState>(ioc_, ctx, std::move(completion));
+            // Create the per-call state before submit to avoid a race.
+            auto call = std::make_shared<ClientCallState>(
+                self->ioc_, ctx, std::move(completion));
 
-    boost::system::error_code ec;
-    auto req = session_->submit(ec, "POST", std::string{path}, frame, hdrs);
-    if (ec) {
-        call->Fail(Status{protocol::AsioErrorToStatusCode(ec.value(), false),
-                          "stream submit failed: " + ec.message()});
-        return;
-    }
+            boost::system::error_code ec;
+            auto req = self->session_->submit(
+                ec, "POST", std::move(path), frame, hdrs);
+            if (ec) {
+                call->Fail(Status{
+                    protocol::AsioErrorToStatusCode(ec.value(), false),
+                    "stream submit failed: " + ec.message()});
+                return;
+            }
 
-    // Track this call so OnGoaway can fail it if the peer did not accept it.
-    const auto stream_id = static_cast<std::int32_t>(req->stream_id());
-    active_calls_.emplace(stream_id, call);
+            // Track this call so OnGoaway can fail it if the peer did not accept it.
+            const auto stream_id =
+                static_cast<std::int32_t>(req->stream_id());
+            self->active_calls_.emplace(stream_id, call);
 
-    req->on_response([call](const nghttp2::asio_http2::client::response& resp) {
-        call->Attach(resp);
-    });
-    req->on_close([self, call, stream_id](uint32_t error_code) {
-        self->RemoveActiveCall(stream_id);
-        call->OnStreamClose(error_code);
-    });
+            // on_response: register sub-callbacks on the response immediately.
+            // The response object is valid for the duration of this callback.
+            req->on_response([call](
+                    const nghttp2::asio_http2::client::response& resp) {
+                call->Attach(resp);
+            });
+            req->on_close([self, call, stream_id](uint32_t error_code) {
+                boost::asio::post(self->strand_,
+                    [self, call, stream_id, error_code]() {
+                        self->RemoveActiveCall(stream_id);
+                        call->OnStreamClose(error_code);
+                    });
+            });
 
-    call->ArmTimer();
+            call->ArmTimer();
+        });
 }
 
 // ── Shared header-builder helper ──────────────────────────────────────────────
@@ -328,77 +436,104 @@ void ChannelImpl::SubmitServerStreamingCall(
         std::string                             request_bytes,
         std::function<void(RawClientReader)>    completion)
 {
-    auto self = shared_from_this();
+    boost::asio::dispatch(strand_,
+        [self = shared_from_this(),
+         path = std::move(path),
+         ctx,
+         request_bytes = std::move(request_bytes),
+         completion = std::move(completion)]() mutable {
+            if (self->state_ == ConnState::kShutdown) {
+                auto call = std::make_shared<ServerStreamingClientCallState>(
+                    self->ioc_, ctx);
+                call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
+                completion(call->TakeReader());
+                return;
+            }
+            if (self->state_ == ConnState::kIdle ||
+                self->state_ == ConnState::kConnecting) {
+                self->pending_generic_calls_.push_back(
+                    [self, path, ctx,
+                     req_bytes = std::move(request_bytes),
+                     comp = std::move(completion)]() mutable {
+                        self->SubmitServerStreamingCall(
+                            std::move(path), ctx,
+                            std::move(req_bytes), std::move(comp));
+                    });
+                if (self->state_ == ConnState::kIdle) {
+                    self->state_ = ConnState::kConnecting;
+                    self->DoConnect();
+                }
+                return;
+            }
+            if (self->state_ == ConnState::kFailed) {
+                auto call = std::make_shared<ServerStreamingClientCallState>(
+                    self->ioc_, ctx);
+                call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
+                completion(call->TakeReader());
+                return;
+            }
 
-    if (state_ == ConnState::kIdle || state_ == ConnState::kConnecting) {
-        pending_generic_calls_.push_back(
-            [self, path, ctx, req_bytes = std::move(request_bytes),
-             comp = std::move(completion)]() mutable {
-                self->SubmitServerStreamingCall(
-                    std::move(path), ctx, std::move(req_bytes), std::move(comp));
+            // Build request headers.
+            nghttp2::asio_http2::header_map hdrs;
+            {
+                Status err;
+                if (!BuildStreamingGrpcHeaders(
+                        self->host_, self->opts_, ctx, hdrs, err)) {
+                    auto call = std::make_shared<ServerStreamingClientCallState>(
+                        self->ioc_, ctx);
+                    call->Fail(std::move(err));
+                    completion(call->TakeReader());
+                    return;
+                }
+            }
+
+            // Encode the single request message.
+            std::string frame;
+            if (!protocol::EncodeFrame(0, request_bytes, frame)) {
+                auto call = std::make_shared<ServerStreamingClientCallState>(
+                    self->ioc_, ctx);
+                call->Fail(Status{StatusCode::RESOURCE_EXHAUSTED,
+                                  "request too large"});
+                completion(call->TakeReader());
+                return;
+            }
+
+            auto call = std::make_shared<ServerStreamingClientCallState>(
+                self->ioc_, ctx);
+
+            boost::system::error_code ec;
+            auto req = self->session_->submit(
+                ec, "POST", std::move(path), frame, hdrs);
+            if (ec) {
+                call->Fail(Status{
+                    protocol::AsioErrorToStatusCode(ec.value(), false),
+                    "stream submit failed: " + ec.message()});
+                completion(call->TakeReader());
+                return;
+            }
+
+            const auto stream_id =
+                static_cast<std::int32_t>(req->stream_id());
+            self->active_streaming_calls_.emplace(stream_id,
+                [call](Status s) { call->Fail(std::move(s)); });
+
+            req->on_response([call](
+                    const nghttp2::asio_http2::client::response& resp) {
+                call->Attach(resp);
             });
-        if (state_ == ConnState::kIdle) {
-            state_ = ConnState::kConnecting;
-            DoConnect();
-        }
-        return;
-    }
-    if (state_ == ConnState::kFailed) {
-        auto call = std::make_shared<ServerStreamingClientCallState>(ioc_, ctx);
-        call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
-        completion(call->TakeReader());
-        return;
-    }
+            req->on_close([self, call, stream_id](uint32_t error_code) {
+                boost::asio::post(self->strand_,
+                    [self, call, stream_id, error_code]() {
+                        self->active_streaming_calls_.erase(stream_id);
+                        call->OnStreamClose(error_code);
+                    });
+            });
 
-    // Build request headers.
-    nghttp2::asio_http2::header_map hdrs;
-    {
-        Status err;
-        if (!BuildStreamingGrpcHeaders(host_, opts_, ctx, hdrs, err)) {
-            auto call = std::make_shared<ServerStreamingClientCallState>(ioc_, ctx);
-            call->Fail(std::move(err));
+            call->ArmTimer();
+
+            // Deliver the reader handle to the caller immediately.
             completion(call->TakeReader());
-            return;
-        }
-    }
-
-    // Encode the single request message.
-    std::string frame;
-    if (!protocol::EncodeFrame(0, request_bytes, frame)) {
-        auto call = std::make_shared<ServerStreamingClientCallState>(ioc_, ctx);
-        call->Fail(Status{StatusCode::RESOURCE_EXHAUSTED, "request too large"});
-        completion(call->TakeReader());
-        return;
-    }
-
-    auto call = std::make_shared<ServerStreamingClientCallState>(ioc_, ctx);
-
-    boost::system::error_code ec;
-    auto req = session_->submit(ec, "POST", std::string{path}, frame, hdrs);
-    if (ec) {
-        call->Fail(Status{protocol::AsioErrorToStatusCode(ec.value(), false),
-                          "stream submit failed: " + ec.message()});
-        completion(call->TakeReader());
-        return;
-    }
-
-    const auto stream_id = static_cast<std::int32_t>(req->stream_id());
-    active_streaming_calls_.emplace(stream_id,
-        [call](Status s) { call->Fail(std::move(s)); });
-
-    req->on_response([call](const nghttp2::asio_http2::client::response& resp) {
-        call->Attach(resp);
-    });
-    req->on_close([self, call, stream_id](uint32_t error_code) {
-        self->active_streaming_calls_.erase(stream_id);
-        call->OnStreamClose(error_code);
-    });
-
-    call->ArmTimer();
-
-    // Deliver the reader handle to the caller immediately; the caller then
-    // co_awaits Read() which suspends until messages arrive.
-    completion(call->TakeReader());
+        });
 }
 
 // ── SubmitClientStreamingCall ─────────────────────────────────────────────────
@@ -433,76 +568,97 @@ void ChannelImpl::SubmitClientStreamingCall(
         ClientContext*                          ctx,
         std::function<void(RawClientWriter)>    completion)
 {
-    auto self = shared_from_this();
+    boost::asio::dispatch(strand_,
+        [self = shared_from_this(),
+         path = std::move(path),
+         ctx,
+         completion = std::move(completion)]() mutable {
+            if (self->state_ == ConnState::kShutdown) {
+                auto call = std::make_shared<ClientStreamingClientCallState>(
+                    self->ioc_, ctx);
+                call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
+                completion(call->TakeWriter());
+                return;
+            }
+            if (self->state_ == ConnState::kIdle ||
+                self->state_ == ConnState::kConnecting) {
+                self->pending_generic_calls_.push_back(
+                    [self, path, ctx,
+                     comp = std::move(completion)]() mutable {
+                        self->SubmitClientStreamingCall(
+                            std::move(path), ctx, std::move(comp));
+                    });
+                if (self->state_ == ConnState::kIdle) {
+                    self->state_ = ConnState::kConnecting;
+                    self->DoConnect();
+                }
+                return;
+            }
+            if (self->state_ == ConnState::kFailed) {
+                auto call = std::make_shared<ClientStreamingClientCallState>(
+                    self->ioc_, ctx);
+                call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
+                completion(call->TakeWriter());
+                return;
+            }
 
-    if (state_ == ConnState::kIdle || state_ == ConnState::kConnecting) {
-        pending_generic_calls_.push_back(
-            [self, path, ctx, comp = std::move(completion)]() mutable {
-                self->SubmitClientStreamingCall(
-                    std::move(path), ctx, std::move(comp));
+            // Build request headers.
+            nghttp2::asio_http2::header_map hdrs;
+            {
+                Status err;
+                if (!BuildStreamingGrpcHeaders(
+                        self->host_, self->opts_, ctx, hdrs, err)) {
+                    auto call = std::make_shared<ClientStreamingClientCallState>(
+                        self->ioc_, ctx);
+                    call->Fail(std::move(err));
+                    completion(call->TakeWriter());
+                    return;
+                }
+            }
+
+            auto call = std::make_shared<ClientStreamingClientCallState>(
+                self->ioc_, ctx);
+            auto writer_impl = call->writer_impl_;
+
+            // Submit with a generator callback that drains writer_impl->pending_.
+            boost::system::error_code ec;
+            auto req = self->session_->submit(
+                ec, "POST", std::move(path),
+                [writer_impl](uint8_t* buf, std::size_t len,
+                              uint32_t* flags) mutable -> ssize_t {
+                    return ClientWriterGenerator(writer_impl.get(), buf, len, flags);
+                },
+                hdrs);
+
+            if (ec) {
+                call->Fail(Status{
+                    protocol::AsioErrorToStatusCode(ec.value(), false),
+                    "stream submit failed: " + ec.message()});
+                completion(call->TakeWriter());
+                return;
+            }
+
+            const auto stream_id =
+                static_cast<std::int32_t>(req->stream_id());
+            self->active_streaming_calls_.emplace(stream_id,
+                [call](Status s) { call->Fail(std::move(s)); });
+
+            // Capture req in on_response so it stays alive until Attach() is called.
+            req->on_response(
+                [call, req](const nghttp2::asio_http2::client::response& resp) {
+                    call->Attach(req, resp);
+                });
+            req->on_close([self, call, stream_id](uint32_t error_code) {
+                boost::asio::post(self->strand_,
+                    [self, call, stream_id, error_code]() {
+                        self->active_streaming_calls_.erase(stream_id);
+                        call->OnStreamClose(error_code);
+                    });
             });
-        if (state_ == ConnState::kIdle) {
-            state_ = ConnState::kConnecting;
-            DoConnect();
-        }
-        return;
-    }
-    if (state_ == ConnState::kFailed) {
-        auto call = std::make_shared<ClientStreamingClientCallState>(ioc_, ctx);
-        call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
-        completion(call->TakeWriter());
-        return;
-    }
 
-    // Build request headers.
-    nghttp2::asio_http2::header_map hdrs;
-    {
-        Status err;
-        if (!BuildStreamingGrpcHeaders(host_, opts_, ctx, hdrs, err)) {
-            auto call = std::make_shared<ClientStreamingClientCallState>(ioc_, ctx);
-            call->Fail(std::move(err));
+            call->ArmTimer();
             completion(call->TakeWriter());
-            return;
-        }
-    }
-
-    auto call = std::make_shared<ClientStreamingClientCallState>(ioc_, ctx);
-    auto writer_impl = call->writer_impl_;
-
-    // Submit with a generator callback that drains writer_impl->pending_.
-    boost::system::error_code ec;
-    auto req = session_->submit(
-        ec, "POST", std::string{path},
-        [writer_impl](uint8_t* buf, std::size_t len, uint32_t* flags) mutable
-                -> ssize_t {
-            return ClientWriterGenerator(writer_impl.get(), buf, len, flags);
-        },
-        hdrs);
-
-    if (ec) {
-        call->Fail(Status{protocol::AsioErrorToStatusCode(ec.value(), false),
-                          "stream submit failed: " + ec.message()});
-        completion(call->TakeWriter());
-        return;
-    }
-
-    const auto stream_id = static_cast<std::int32_t>(req->stream_id());
-    active_streaming_calls_.emplace(stream_id,
-        [call](Status s) { call->Fail(std::move(s)); });
-
-    // Capture req in on_response so it stays alive until Attach() is called,
-    // which sets writer_impl_->req_ so Write()/WritesDone() can call resume().
-    req->on_response(
-        [call, req](const nghttp2::asio_http2::client::response& resp) {
-            call->Attach(req, resp);
         });
-    req->on_close([self, call, stream_id](uint32_t error_code) {
-        self->active_streaming_calls_.erase(stream_id);
-        call->OnStreamClose(error_code);
-    });
-
-    call->ArmTimer();
-    completion(call->TakeWriter());
 }
 
 // ── SubmitBidiStreamingCall ───────────────────────────────────────────────────
@@ -512,73 +668,96 @@ void ChannelImpl::SubmitBidiStreamingCall(
         ClientContext*                          ctx,
         std::function<void(BidiHandles)>        completion)
 {
-    auto self = shared_from_this();
+    boost::asio::dispatch(strand_,
+        [self = shared_from_this(),
+         path = std::move(path),
+         ctx,
+         completion = std::move(completion)]() mutable {
+            if (self->state_ == ConnState::kShutdown) {
+                auto call = std::make_shared<BidiStreamingClientCallState>(
+                    self->ioc_, ctx);
+                call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
+                completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
+                return;
+            }
+            if (self->state_ == ConnState::kIdle ||
+                self->state_ == ConnState::kConnecting) {
+                self->pending_generic_calls_.push_back(
+                    [self, path, ctx,
+                     comp = std::move(completion)]() mutable {
+                        self->SubmitBidiStreamingCall(
+                            std::move(path), ctx, std::move(comp));
+                    });
+                if (self->state_ == ConnState::kIdle) {
+                    self->state_ = ConnState::kConnecting;
+                    self->DoConnect();
+                }
+                return;
+            }
+            if (self->state_ == ConnState::kFailed) {
+                auto call = std::make_shared<BidiStreamingClientCallState>(
+                    self->ioc_, ctx);
+                call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
+                completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
+                return;
+            }
 
-    if (state_ == ConnState::kIdle || state_ == ConnState::kConnecting) {
-        pending_generic_calls_.push_back(
-            [self, path, ctx, comp = std::move(completion)]() mutable {
-                self->SubmitBidiStreamingCall(
-                    std::move(path), ctx, std::move(comp));
+            // Build request headers.
+            nghttp2::asio_http2::header_map hdrs;
+            {
+                Status err;
+                if (!BuildStreamingGrpcHeaders(
+                        self->host_, self->opts_, ctx, hdrs, err)) {
+                    auto call = std::make_shared<BidiStreamingClientCallState>(
+                        self->ioc_, ctx);
+                    call->Fail(std::move(err));
+                    completion(BidiHandles{
+                        call->TakeReader(), call->TakeWriter()});
+                    return;
+                }
+            }
+
+            auto call = std::make_shared<BidiStreamingClientCallState>(
+                self->ioc_, ctx);
+            auto writer_impl = call->writer_impl_;
+
+            boost::system::error_code ec;
+            auto req = self->session_->submit(
+                ec, "POST", std::move(path),
+                [writer_impl](uint8_t* buf, std::size_t len,
+                              uint32_t* flags) mutable -> ssize_t {
+                    return ClientWriterGenerator(writer_impl.get(), buf, len, flags);
+                },
+                hdrs);
+
+            if (ec) {
+                call->Fail(Status{
+                    protocol::AsioErrorToStatusCode(ec.value(), false),
+                    "stream submit failed: " + ec.message()});
+                completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
+                return;
+            }
+
+            const auto stream_id =
+                static_cast<std::int32_t>(req->stream_id());
+            self->active_streaming_calls_.emplace(stream_id,
+                [call](Status s) { call->Fail(std::move(s)); });
+
+            req->on_response(
+                [call, req](const nghttp2::asio_http2::client::response& resp) {
+                    call->Attach(req, resp);
+                });
+            req->on_close([self, call, stream_id](uint32_t error_code) {
+                boost::asio::post(self->strand_,
+                    [self, call, stream_id, error_code]() {
+                        self->active_streaming_calls_.erase(stream_id);
+                        call->OnStreamClose(error_code);
+                    });
             });
-        if (state_ == ConnState::kIdle) {
-            state_ = ConnState::kConnecting;
-            DoConnect();
-        }
-        return;
-    }
-    if (state_ == ConnState::kFailed) {
-        auto call = std::make_shared<BidiStreamingClientCallState>(ioc_, ctx);
-        call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
-        completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
-        return;
-    }
 
-    // Build request headers.
-    nghttp2::asio_http2::header_map hdrs;
-    {
-        Status err;
-        if (!BuildStreamingGrpcHeaders(host_, opts_, ctx, hdrs, err)) {
-            auto call = std::make_shared<BidiStreamingClientCallState>(ioc_, ctx);
-            call->Fail(std::move(err));
+            call->ArmTimer();
             completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
-            return;
-        }
-    }
-
-    auto call = std::make_shared<BidiStreamingClientCallState>(ioc_, ctx);
-    auto writer_impl = call->writer_impl_;
-
-    boost::system::error_code ec;
-    auto req = session_->submit(
-        ec, "POST", std::string{path},
-        [writer_impl](uint8_t* buf, std::size_t len, uint32_t* flags) mutable
-                -> ssize_t {
-            return ClientWriterGenerator(writer_impl.get(), buf, len, flags);
-        },
-        hdrs);
-
-    if (ec) {
-        call->Fail(Status{protocol::AsioErrorToStatusCode(ec.value(), false),
-                          "stream submit failed: " + ec.message()});
-        completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
-        return;
-    }
-
-    const auto stream_id = static_cast<std::int32_t>(req->stream_id());
-    active_streaming_calls_.emplace(stream_id,
-        [call](Status s) { call->Fail(std::move(s)); });
-
-    req->on_response(
-        [call, req](const nghttp2::asio_http2::client::response& resp) {
-            call->Attach(req, resp);
         });
-    req->on_close([self, call, stream_id](uint32_t error_code) {
-        self->active_streaming_calls_.erase(stream_id);
-        call->OnStreamClose(error_code);
-    });
-
-    call->ArmTimer();
-    completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
 }
 
 } // namespace rpcpio::internal
@@ -599,6 +778,10 @@ Channel::Channel(boost::asio::io_context& ioc,
 {}
 
 Channel::~Channel() = default;
+
+void Channel::Shutdown() {
+    impl_->Shutdown();
+}
 
 boost::asio::awaitable<void> Channel::Connect() {
     auto impl = impl_;

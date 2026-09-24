@@ -1,6 +1,56 @@
 package(default_visibility = ["//visibility:private"])
 
 cc_test(
+    name = "peer_identity_test",
+    srcs = ["peer_identity_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//:rpcpio_runtime",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "startup_error_test",
+    srcs = ["startup_error_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//:rpcpio_runtime",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "response_size_test",
+    srcs = ["response_size_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//:rpcpio_runtime",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "shutdown_test",
+    srcs = ["shutdown_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//:rpcpio_runtime",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "strand_test",
+    srcs = ["strand_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//:rpcpio_runtime",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "framing_test",
     srcs = ["framing_test.cc"],
     copts = ["-std=c++20"],

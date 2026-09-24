@@ -129,7 +129,8 @@ public:
         const nghttp2::asio_http2::server::response&    resp,
         RawClientStreamingHandler                       handler,
         std::size_t                                     max_message_size,
-        std::size_t                                     max_metadata_size);
+        std::size_t                                     max_metadata_size,
+        std::size_t                                     max_response_size);
 
     // Register on_data callback and start the handler coroutine.
     void Start();
@@ -148,6 +149,7 @@ private:
     RawClientStreamingHandler                      handler_;
     std::size_t                                    max_message_size_;
     std::size_t                                    max_metadata_size_;
+    std::size_t                                    max_response_size_;
 
     StreamingFrameParser      parser_;   // multi-message LPM frame parser
     ServerContext             ctx_;

@@ -55,6 +55,10 @@ public:
     // Proactively establish the connection (optional; first UnaryCall connects lazily).
     boost::asio::awaitable<void> Connect();
 
+    // Permanently stop the channel. Fails all pending and in-flight calls with
+    // CANCELLED. Idempotent. Safe to call from any thread.
+    void Shutdown();
+
     // Execute one unary RPC.
     // Req and Resp must derive from google::protobuf::Message.
     template<typename Req, typename Resp>

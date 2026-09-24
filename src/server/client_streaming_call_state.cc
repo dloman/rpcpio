@@ -23,13 +23,15 @@ ClientStreamingCallState::ClientStreamingCallState(
     const nghttp2::asio_http2::server::response&    resp,
     RawClientStreamingHandler                       handler,
     std::size_t                                     max_message_size,
-    std::size_t                                     max_metadata_size)
+    std::size_t                                     max_metadata_size,
+    std::size_t                                     max_response_size)
     : ioc_(ioc)
     , req_(req)
     , resp_(resp)
     , handler_(std::move(handler))
     , max_message_size_(max_message_size)
     , max_metadata_size_(max_metadata_size)
+    , max_response_size_(max_response_size)
     , parser_(max_message_size)
     , timer_(ioc)
     , reader_impl_(std::make_shared<RawServerReaderImpl>(ioc))
@@ -46,13 +48,12 @@ void ClientStreamingCallState::Start() {
     }
     ctx_.set_client_metadata(std::move(client_meta));
 
-    // Derive peer string.
+    // Populate authority from the :authority pseudo-header (untrusted routing info).
     {
         auto it = req_.header().find(":authority");
-        std::string peer =
-            (it != req_.header().end()) ? it->second.value : "unknown";
-        ctx_.set_peer(std::move(peer));
+        ctx_.set_authority(it != req_.header().end() ? it->second.value : std::string{});
     }
+    // peer_identity_ stays nullopt for h2c; mTLS identity set by server_impl after cert verification.
 
     // Parse grpc-timeout and arm the deadline timer.
     {
@@ -159,6 +160,22 @@ void ClientStreamingCallState::SendResponse(
     const MetadataMap& trailing_meta)
 {
     if (responded_) return;
+
+    // Check uncompressed response size before framing.
+    if (status.ok() && !resp_bytes.empty() && resp_bytes.size() > max_response_size_) {
+        responded_ = true;
+        timer_.cancel();
+        nghttp2::asio_http2::header_map hdrs;
+        AddCommonHeadersCS(hdrs);
+        protocol::BuildTrailers(
+            Status{StatusCode::RESOURCE_EXHAUSTED,
+                   "response message exceeds max_response_message_size"},
+            {}, hdrs);
+        resp_.write_head(200, std::move(hdrs));
+        resp_.end();
+        return;
+    }
+
     responded_ = true;
 
     if (!status.ok() || resp_bytes.empty()) {

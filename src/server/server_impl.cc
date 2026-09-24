@@ -55,7 +55,7 @@ std::uint16_t ServerImpl::ResolvePort(std::uint16_t port) {
     return chosen;
 }
 
-void ServerImpl::Start(std::string host, std::uint16_t port) {
+rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
     port = ResolvePort(port);
     bound_port_ = port;
     auto self = this;
@@ -71,14 +71,24 @@ void ServerImpl::Start(std::string host, std::uint16_t port) {
 
     if (!opts_.server_cert_file.empty() && !opts_.use_h2c) {
         boost::asio::ssl::context ssl_ctx(boost::asio::ssl::context::tls_server);
-        ssl_ctx.use_certificate_chain_file(opts_.server_cert_file);
+
+        ssl_ctx.use_certificate_chain_file(opts_.server_cert_file, ec);
+        if (ec) return Status{StatusCode::INVALID_ARGUMENT,
+                              "server cert file: " + ec.message()};
+
         ssl_ctx.use_private_key_file(opts_.server_key_file,
-                                      boost::asio::ssl::context::pem);
+                                      boost::asio::ssl::context::pem, ec);
+        if (ec) return Status{StatusCode::INVALID_ARGUMENT,
+                              "server key file: " + ec.message()};
+
         if (!opts_.ca_cert_file.empty()) {
-            ssl_ctx.load_verify_file(opts_.ca_cert_file);
+            ssl_ctx.load_verify_file(opts_.ca_cert_file, ec);
+            if (ec) return Status{StatusCode::INVALID_ARGUMENT,
+                                  "CA cert file: " + ec.message()};
             ssl_ctx.set_verify_mode(boost::asio::ssl::verify_peer |
                                     boost::asio::ssl::verify_fail_if_no_peer_cert);
         }
+
         // ALPN h2
         static const unsigned char kH2Alpn[] = "\x02h2";
         SSL_CTX_set_alpn_select_cb(ssl_ctx.native_handle(),
@@ -98,12 +108,15 @@ void ServerImpl::Start(std::string host, std::uint16_t port) {
         http2_.listen_and_serve(ec, host, std::to_string(port), true);
     }
 
-    if (ec) throw boost::system::system_error(ec, "server listen failed");
+    if (ec) return Status{StatusCode::UNAVAILABLE,
+                          "server listen failed: " + ec.message()};
 
     // Spin up worker threads.
     for (std::uint32_t i = 0; i < opts_.num_threads; ++i) {
         threads_.emplace_back([this]() { ioc_.run(); });
     }
+
+    return Status{};
 }
 
 void ServerImpl::Shutdown() {
@@ -165,7 +178,8 @@ void ServerImpl::HandleRequest(
             auto state = std::make_shared<ServerCallState>(
                 ioc_, req, resp, it->second,
                 opts_.max_request_message_size,
-                opts_.max_metadata_size);
+                opts_.max_metadata_size,
+                opts_.max_response_message_size);
             state->Start();
             return;
         }
@@ -176,7 +190,8 @@ void ServerImpl::HandleRequest(
             auto state = std::make_shared<ServerStreamingCallState>(
                 ioc_, req, resp, it->second,
                 opts_.max_request_message_size,
-                opts_.max_metadata_size);
+                opts_.max_metadata_size,
+                opts_.max_response_message_size);
             state->Start();
             return;
         }
@@ -187,7 +202,8 @@ void ServerImpl::HandleRequest(
             auto state = std::make_shared<ClientStreamingCallState>(
                 ioc_, req, resp, it->second,
                 opts_.max_request_message_size,
-                opts_.max_metadata_size);
+                opts_.max_metadata_size,
+                opts_.max_response_message_size);
             state->Start();
             return;
         }
@@ -198,7 +214,8 @@ void ServerImpl::HandleRequest(
             auto state = std::make_shared<BidiStreamingCallState>(
                 ioc_, req, resp, it->second,
                 opts_.max_request_message_size,
-                opts_.max_metadata_size);
+                opts_.max_metadata_size,
+                opts_.max_response_message_size);
             state->Start();
             return;
         }
@@ -246,8 +263,8 @@ void Server::RegisterBidiRaw(std::string_view path,
     impl_->RegisterBidiRaw(path, std::move(handler));
 }
 
-void Server::Start(std::string host, std::uint16_t port) {
-    impl_->Start(std::move(host), port);
+rpcpio::Status Server::Start(std::string host, std::uint16_t port) {
+    return impl_->Start(std::move(host), port);
 }
 
 std::uint16_t Server::bound_port() const noexcept {

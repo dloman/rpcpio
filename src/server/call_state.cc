@@ -20,13 +20,15 @@ ServerCallState::ServerCallState(
     const nghttp2::asio_http2::server::response&    resp,
     RawHandler                                       handler,
     std::size_t                                      max_request_size,
-    std::size_t                                      max_metadata_size)
+    std::size_t                                      max_metadata_size,
+    std::size_t                                      max_response_size)
     : ioc_(ioc)
     , req_(req)
     , resp_(resp)
     , handler_(std::move(handler))
     , max_request_size_(max_request_size)
     , max_metadata_size_(max_metadata_size)
+    , max_response_size_(max_response_size)
     , decoder_(max_request_size)
     , timer_(ioc)
 {}
@@ -57,14 +59,12 @@ void ServerCallState::Start() {
         }
     }
 
-    // Derive peer string from URI authority or a placeholder.
-    // nghttp2-asio exposes the remote address differently per build; fall back
-    // to the :authority pseudo-header.
+    // Populate authority from the :authority pseudo-header (untrusted routing info).
     {
         auto it = req_.header().find(":authority");
-        std::string peer = (it != req_.header().end()) ? it->second.value : "unknown";
-        ctx_.set_peer(std::move(peer));
+        ctx_.set_authority(it != req_.header().end() ? it->second.value : std::string{});
     }
+    // peer_identity_ stays nullopt for h2c; mTLS identity set by server_impl after cert verification.
 
     // Parse grpc-timeout and arm the deadline timer.
     auto tmo_it = req_.header().find("grpc-timeout");
@@ -211,6 +211,19 @@ void ServerCallState::SendResponse(const Status&      status,
         AddCommonHeaders(hdrs);
         protocol::MetadataToNghttp2Headers(initial_meta, hdrs);
         protocol::BuildTrailers(status, trailing_meta, hdrs);
+        resp_.write_head(200, std::move(hdrs));
+        resp_.end();
+        return;
+    }
+
+    // Check uncompressed response size before framing.
+    if (resp_bytes.size() > max_response_size_) {
+        nghttp2::asio_http2::header_map hdrs;
+        AddCommonHeaders(hdrs);
+        protocol::BuildTrailers(
+            Status{StatusCode::RESOURCE_EXHAUSTED,
+                   "response message exceeds max_response_message_size"},
+            {}, hdrs);
         resp_.write_head(200, std::move(hdrs));
         resp_.end();
         return;

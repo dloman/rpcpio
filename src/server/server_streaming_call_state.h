@@ -42,7 +42,8 @@ public:
         const nghttp2::asio_http2::server::response&    resp,
         RawServerStreamingHandler                       handler,
         std::size_t                                     max_request_size,
-        std::size_t                                     max_metadata_size);
+        std::size_t                                     max_metadata_size,
+        std::size_t                                     max_response_size);
 
     // Register on_data callback and begin receiving the request body.
     void Start();
@@ -61,6 +62,7 @@ private:
     RawServerStreamingHandler                      handler_;
     std::size_t                                    max_request_size_;
     std::size_t                                    max_metadata_size_;
+    std::size_t                                    max_response_size_;
 
     protocol::FrameDecoder    decoder_;
     ServerContext             ctx_;

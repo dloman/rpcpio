@@ -110,7 +110,7 @@ protected:
 
         server_ = std::make_unique<rpcpio::Server>(ioc_, opts);
         service_.Register(*server_);
-        server_->Start("127.0.0.1", 0);   // OS picks ephemeral port
+        ASSERT_TRUE(server_->Start("127.0.0.1", 0).ok());  // OS picks ephemeral port
         port_ = server_->bound_port();
 
         thread_ = std::thread([this] { ioc_.run(); });

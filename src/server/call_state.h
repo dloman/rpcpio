@@ -30,7 +30,8 @@ public:
                     const nghttp2::asio_http2::server::response& resp,
                     RawHandler                            handler,
                     std::size_t                           max_request_size,
-                    std::size_t                           max_metadata_size);
+                    std::size_t                           max_metadata_size,
+                    std::size_t                           max_response_size);
 
     // Begin receiving request data and, once complete, dispatch the handler.
     void Start();
@@ -52,6 +53,7 @@ private:
     RawHandler                                     handler_;
     std::size_t                                    max_request_size_;
     std::size_t                                    max_metadata_size_;
+    std::size_t                                    max_response_size_;
 
     protocol::FrameDecoder           decoder_;
     std::optional<protocol::Encoding> request_encoding_;  // from grpc-encoding header

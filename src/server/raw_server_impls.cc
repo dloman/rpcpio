@@ -15,6 +15,11 @@ Status RawServerWriterImpl::Write(std::string_view proto_bytes) {
         return Status{StatusCode::INTERNAL,
                       "RawServerWriterImpl::Write called after Finish"};
     }
+    // Check uncompressed message size before framing.
+    if (proto_bytes.size() > max_response_size_) {
+        return Status{StatusCode::RESOURCE_EXHAUSTED,
+                      "response message exceeds max_response_message_size"};
+    }
     std::string frame;
     if (!protocol::EncodeFrame(0, proto_bytes, frame)) {
         return Status{StatusCode::RESOURCE_EXHAUSTED, "message too large to frame"};

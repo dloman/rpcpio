@@ -23,17 +23,19 @@ BidiStreamingCallState::BidiStreamingCallState(
     const nghttp2::asio_http2::server::response&    resp,
     RawBidiStreamingHandler                         handler,
     std::size_t                                     max_message_size,
-    std::size_t                                     max_metadata_size)
+    std::size_t                                     max_metadata_size,
+    std::size_t                                     max_response_size)
     : ioc_(ioc)
     , req_(req)
     , resp_(resp)
     , handler_(std::move(handler))
     , max_message_size_(max_message_size)
     , max_metadata_size_(max_metadata_size)
+    , max_response_size_(max_response_size)
     , parser_(max_message_size)
     , timer_(ioc)
     , reader_impl_(std::make_shared<RawServerReaderImpl>(ioc))
-    , writer_impl_(std::make_shared<RawServerWriterImpl>(resp))
+    , writer_impl_(std::make_shared<RawServerWriterImpl>(resp, max_response_size))
 {}
 
 void BidiStreamingCallState::Start() {
@@ -47,13 +49,12 @@ void BidiStreamingCallState::Start() {
     }
     ctx_.set_client_metadata(std::move(client_meta));
 
-    // Derive peer string.
+    // Populate authority from the :authority pseudo-header (untrusted routing info).
     {
         auto it = req_.header().find(":authority");
-        std::string peer =
-            (it != req_.header().end()) ? it->second.value : "unknown";
-        ctx_.set_peer(std::move(peer));
+        ctx_.set_authority(it != req_.header().end() ? it->second.value : std::string{});
     }
+    // peer_identity_ stays nullopt for h2c; mTLS identity set by server_impl after cert verification.
 
     // Parse grpc-timeout and arm deadline timer.
     {

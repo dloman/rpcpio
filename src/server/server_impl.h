@@ -37,9 +37,9 @@ public:
     void RegisterBidiRaw(std::string_view path,
                           RawBidiStreamingHandler handler);
 
-    // Bind and start accepting connections.  If port is 0 the OS picks an
-    // ephemeral port; call bound_port() afterward to discover it.
-    void Start(std::string host, std::uint16_t port);
+    // Bind and start accepting connections. Returns non-OK on port conflict or
+    // TLS configuration errors; never throws. Pass port=0 for ephemeral.
+    rpcpio::Status Start(std::string host, std::uint16_t port);
 
     // Returns the port the server is actually listening on.
     // Valid only after a successful Start() call.

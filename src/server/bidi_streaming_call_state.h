@@ -44,7 +44,8 @@ public:
         const nghttp2::asio_http2::server::response&    resp,
         RawBidiStreamingHandler                         handler,
         std::size_t                                     max_message_size,
-        std::size_t                                     max_metadata_size);
+        std::size_t                                     max_metadata_size,
+        std::size_t                                     max_response_size);
 
     // Register on_data callback, send initial HTTP 200, arm generator, and
     // start the handler coroutine.
@@ -61,6 +62,7 @@ private:
     RawBidiStreamingHandler                        handler_;
     std::size_t                                    max_message_size_;
     std::size_t                                    max_metadata_size_;
+    std::size_t                                    max_response_size_;
 
     StreamingFrameParser      parser_;   // multi-message LPM frame parser
     ServerContext             ctx_;

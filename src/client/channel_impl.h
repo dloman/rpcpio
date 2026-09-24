@@ -12,6 +12,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <nghttp2/asio_http2_client.h>
 #include "rpcpio/channel.h"
 #include "rpcpio/client_context.h"
@@ -27,10 +28,11 @@ class ClientStreamingClientCallState;
 class BidiStreamingClientCallState;
 
 // State of the shared connection.
-enum class ConnState { kIdle, kConnecting, kReady, kFailed };
+enum class ConnState { kIdle, kConnecting, kReady, kFailed, kShutdown };
 
 // ChannelImpl owns the nghttp2 client session and connection lifecycle.
-// All public methods must be called from the associated io_context strand.
+// All public methods dispatch to strand_ before touching state, making the
+// class safe to call from any thread running the associated io_context.
 class ChannelImpl : public std::enable_shared_from_this<ChannelImpl> {
 public:
     ChannelImpl(boost::asio::io_context& ioc,
@@ -42,6 +44,9 @@ public:
 
     // Initiate connection (idempotent; safe to call while already connecting).
     void Connect(std::function<void(boost::system::error_code)> cb);
+
+    // Permanently stop the channel. Idempotent. Safe to call from any thread.
+    void Shutdown();
 
     // Submit a unary call.  If the connection is not yet ready, queues the
     // call until connection completes (or fails).
@@ -78,7 +83,12 @@ public:
     boost::asio::io_context& ioc() noexcept { return ioc_; }
     const ChannelOptions&    opts() const noexcept { return opts_; }
 
+    // Expose strand so callers can post work serialized with ChannelImpl state.
+    const boost::asio::strand<boost::asio::io_context::executor_type>&
+    strand() const noexcept { return strand_; }
+
 private:
+    // Internal implementations (must be called only from strand_).
     void DoConnect();
     void OnConnected(boost::system::error_code ec);
     void DrainQueue(boost::system::error_code ec);
@@ -100,6 +110,7 @@ private:
     };
 
     boost::asio::io_context&              ioc_;
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
     std::string                           host_;
     std::uint16_t                         port_;
     ChannelOptions                        opts_;
@@ -110,8 +121,11 @@ private:
     // Generic pending lambdas for streaming calls (queued while connecting).
     std::deque<std::function<void()>> pending_generic_calls_;
 
-    // nghttp2-asio client session (created on demand; null until connected)
+    // nghttp2-asio client session (created on demand; null until connected).
     std::shared_ptr<nghttp2::asio_http2::client::session> session_;
+
+    // Holds the session during connection setup so Shutdown() can close it.
+    std::shared_ptr<nghttp2::asio_http2::client::session> connecting_session_;
 
     // Callbacks waiting for connection to be established.
     std::vector<std::function<void(boost::system::error_code)>> connect_waiters_;

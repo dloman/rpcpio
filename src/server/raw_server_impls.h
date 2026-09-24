@@ -32,12 +32,13 @@ struct RawServerReaderImpl {
 // Used by server-streaming and bidi-streaming call states.
 // Holds the send queue and trailing headers; the nghttp2 generator drains it.
 struct RawServerWriterImpl {
-    explicit RawServerWriterImpl(
-        const nghttp2::asio_http2::server::response& resp)
-        : resp_(resp)
+    RawServerWriterImpl(const nghttp2::asio_http2::server::response& resp,
+                        std::size_t max_response_size)
+        : resp_(resp), max_response_size_(max_response_size)
     {}
 
     const nghttp2::asio_http2::server::response& resp_;
+    std::size_t max_response_size_;
 
     // LPM-encoded frames waiting to be consumed by the generator callback.
     std::deque<std::string> pending_;

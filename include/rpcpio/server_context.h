@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <optional>
 #include <string>
 #include <boost/asio/cancellation_signal.hpp>
 #include "rpcpio/metadata.h"
@@ -23,7 +24,17 @@ public:
     // ── Incoming call info (read-only to handler) ─────────────────────────────
 
     const MetadataMap& client_metadata() const noexcept { return client_metadata_; }
-    const std::string& peer()            const noexcept { return peer_; }
+
+    // Untrusted HTTP/2 :authority pseudo-header (routing info, NOT authenticated identity).
+    const std::string& authority() const noexcept { return authority_; }
+
+    // Authenticated peer identity, absent unless mTLS succeeded.
+    // For mTLS, this is the first URI SAN or DNS SAN from the verified client certificate.
+    const std::optional<std::string>& peer_identity() const noexcept { return peer_identity_; }
+
+    // Deprecated: use authority() instead.
+    [[deprecated("use authority()")]]
+    const std::string& peer() const noexcept { return authority_; }
 
     bool has_deadline() const noexcept { return has_deadline_; }
     std::chrono::system_clock::time_point deadline() const noexcept { return deadline_; }
@@ -59,7 +70,8 @@ private:
     friend class internal::ClientStreamingCallState;
     friend class internal::BidiStreamingCallState;
 
-    void set_peer(std::string peer)                                       { peer_ = std::move(peer); }
+    void set_authority(std::string a)            { authority_ = std::move(a); }
+    void set_peer_identity(std::string identity) { peer_identity_ = std::move(identity); }
     void set_deadline(std::chrono::system_clock::time_point d)            { deadline_ = d; }
     void set_has_deadline(bool v)                                         { has_deadline_ = v; }
     void set_client_metadata(MetadataMap meta)                            { client_metadata_ = std::move(meta); }
@@ -68,7 +80,8 @@ private:
     }
 
     MetadataMap client_metadata_;
-    std::string peer_;
+    std::string authority_;
+    std::optional<std::string> peer_identity_;
     bool        has_deadline_{false};
     std::chrono::system_clock::time_point deadline_{};
     MetadataMap initial_metadata_;
