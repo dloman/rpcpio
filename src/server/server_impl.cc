@@ -4,7 +4,9 @@
 #include "client_streaming_call_state.h"
 #include "bidi_streaming_call_state.h"
 
+#include <algorithm>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <nghttp2/asio_http2_server.h>
 #include <openssl/x509.h>
@@ -60,13 +62,22 @@ std::string PeerIdentity(X509* certificate) {
 namespace rpcpio::internal {
 
 ServerImpl::ServerImpl(boost::asio::io_context& ioc, ServerOptions opts)
-    : ioc_(ioc)
+    : owned_ioc_(opts.num_threads == 0
+          ? nullptr
+          : std::make_unique<boost::asio::io_context>())
+    , ioc_(owned_ioc_ ? *owned_ioc_ : ioc)
     , opts_(std::move(opts))
-    , http2_(ioc)    // share caller's io_context for both I/O and handler coroutines
-{}
+    , http2_(ioc_)
+    , shutdown_timer_(ioc_)
+{
+    if (owned_ioc_) {
+        work_guard_.emplace(ioc_.get_executor());
+    }
+}
 
 ServerImpl::~ServerImpl() {
     Shutdown();
+    Wait();
 }
 
 void ServerImpl::RegisterUnaryRaw(std::string_view path, RawHandler handler) {
@@ -173,18 +184,101 @@ rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
 
 void ServerImpl::Shutdown() {
     if (shutdown_.exchange(true)) return;
-    if (listening_) http2_.stop();
-    ioc_.stop();
-    for (auto& t : threads_) {
-        if (t.joinable()) t.join();
+
+    if (listening_) {
+        http2_.stop_listening();
     }
-    threads_.clear();
+
+    std::vector<std::shared_ptr<ServerCallStateBase>> calls;
+    {
+        std::lock_guard lock(active_calls_mutex_);
+        for (const auto& weak_call : active_calls_) {
+            if (auto call = weak_call.lock()) {
+                calls.push_back(std::move(call));
+            }
+        }
+        active_calls_.clear();
+    }
+    for (const auto& call : calls) {
+        call->Cancel(
+            Status{StatusCode::UNAVAILABLE, "server shutting down"});
+    }
+
+    if (!listening_) {
+        work_guard_.reset();
+        return;
+    }
+    if (ioc_.stopped()) {
+        StopTransport();
+        return;
+    }
+
+    boost::asio::post(ioc_, [self = shared_from_this()] {
+        self->FinishShutdown(
+            std::chrono::steady_clock::now() + self->opts_.grace_period);
+    });
 }
 
 void ServerImpl::Wait() {
-    for (auto& t : threads_) {
-        if (t.joinable()) t.join();
+    std::vector<std::thread> threads;
+    {
+        std::lock_guard lock(threads_mutex_);
+        threads = std::move(threads_);
     }
+    for (auto& thread : threads) {
+        if (!thread.joinable()) {
+            continue;
+        }
+        if (thread.get_id() == std::this_thread::get_id()) {
+            thread.detach();
+        } else {
+            thread.join();
+        }
+    }
+}
+
+void ServerImpl::StopTransport() {
+    shutdown_timer_.cancel();
+    if (listening_.exchange(false)) {
+        http2_.stop();
+    }
+    work_guard_.reset();
+}
+
+void ServerImpl::FinishShutdown(
+        std::chrono::steady_clock::time_point deadline) {
+    bool has_active_calls = false;
+    {
+        std::lock_guard lock(active_calls_mutex_);
+        std::erase_if(active_calls_, [](const auto& weak_call) {
+            auto call = weak_call.lock();
+            return !call || call->IsTerminal();
+        });
+        has_active_calls = !active_calls_.empty();
+    }
+
+    if (!has_active_calls || std::chrono::steady_clock::now() >= deadline) {
+        StopTransport();
+        return;
+    }
+
+    shutdown_timer_.expires_after(std::chrono::milliseconds(1));
+    shutdown_timer_.async_wait(
+        [self = shared_from_this(), deadline](
+                const boost::system::error_code& error) {
+            if (!error) {
+                self->FinishShutdown(deadline);
+            }
+        });
+}
+
+void ServerImpl::TrackCall(
+        const std::shared_ptr<ServerCallStateBase>& call) {
+    std::lock_guard lock(active_calls_mutex_);
+    std::erase_if(active_calls_, [](const auto& weak_call) {
+        return weak_call.expired();
+    });
+    active_calls_.push_back(call);
 }
 
 void ServerImpl::HandleRequest(
@@ -193,6 +287,15 @@ void ServerImpl::HandleRequest(
 {
     const std::string& path   = req.uri().path;
     const std::string& method = req.method();
+
+    if (shutdown_) {
+        nghttp2::asio_http2::header_map trail;
+        protocol::BuildTrailers(
+            Status{StatusCode::UNAVAILABLE, "server shutting down"}, {}, trail);
+        resp.write_head(200, trail);
+        resp.end();
+        return;
+    }
 
     // Validate HTTP method.
     if (method != "POST") {
@@ -236,6 +339,7 @@ void ServerImpl::HandleRequest(
                 opts_.max_metadata_size,
                 opts_.max_response_message_size,
                 peer_identity);
+            TrackCall(state);
             state->Start();
             return;
         }
@@ -249,6 +353,7 @@ void ServerImpl::HandleRequest(
                 opts_.max_metadata_size,
                 opts_.max_response_message_size,
                 peer_identity);
+            TrackCall(state);
             state->Start();
             return;
         }
@@ -262,6 +367,7 @@ void ServerImpl::HandleRequest(
                 opts_.max_metadata_size,
                 opts_.max_response_message_size,
                 peer_identity);
+            TrackCall(state);
             state->Start();
             return;
         }
@@ -275,6 +381,7 @@ void ServerImpl::HandleRequest(
                 opts_.max_metadata_size,
                 opts_.max_response_message_size,
                 peer_identity);
+            TrackCall(state);
             state->Start();
             return;
         }
@@ -301,7 +408,10 @@ Server::Server(boost::asio::io_context& ioc, ServerOptions opts)
     : impl_(std::make_shared<internal::ServerImpl>(ioc, std::move(opts)))
 {}
 
-Server::~Server() = default;
+Server::~Server() {
+    impl_->Shutdown();
+    impl_->Wait();
+}
 
 void Server::RegisterUnaryRaw(std::string_view path, RawHandler handler) {
     impl_->RegisterUnaryRaw(path, std::move(handler));

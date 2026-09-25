@@ -5,6 +5,7 @@
 #include <nghttp2/nghttp2.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
 #include "rpcpio/internal/raw_server_reader.h"
 #include "src/protocol/compression.h"
@@ -26,7 +27,7 @@ ClientStreamingCallState::ClientStreamingCallState(
     std::size_t                                     max_metadata_size,
     std::size_t                                     max_response_size,
     std::string                                     peer_identity)
-    : ioc_(ioc)
+    : executor_(req.get_executor())
     , req_(req)
     , resp_(resp)
     , handler_(std::move(handler))
@@ -35,11 +36,16 @@ ClientStreamingCallState::ClientStreamingCallState(
     , max_response_size_(max_response_size)
     , peer_identity_(std::move(peer_identity))
     , parser_(max_message_size)
-    , timer_(ioc)
+    , timer_(executor_)
     , reader_impl_(std::make_shared<RawServerReaderImpl>(ioc))
 {}
 
 void ClientStreamingCallState::Start() {
+    auto self = shared_from_this();
+    resp_.on_close([self](std::uint32_t) {
+        self->OnClose();
+    });
+
     // Collect client metadata.
     MetadataMap client_meta;
     Status meta_status = protocol::Nghttp2HeadersToMetadata(
@@ -85,7 +91,7 @@ void ClientStreamingCallState::Start() {
 
     // Register DATA callback.  Decodes incoming LPM frames and pushes each
     // decoded proto payload into the reader queue.
-    auto self = shared_from_this();
+    self = shared_from_this();
     req_.on_data([self](const uint8_t* data, std::size_t len) {
         self->OnData(data, len);
     });
@@ -93,7 +99,7 @@ void ClientStreamingCallState::Start() {
     // Start the handler coroutine immediately; it will block in reader.Read()
     // until messages arrive via the queue.
     boost::asio::co_spawn(
-        ioc_,
+        executor_,
         [self]() -> boost::asio::awaitable<void> {
             RawServerReader reader(self->reader_impl_);
             std::string resp_bytes;
@@ -111,6 +117,34 @@ void ClientStreamingCallState::Start() {
             }
         },
         boost::asio::detached);
+}
+
+void ClientStreamingCallState::Cancel(Status status) {
+    boost::asio::dispatch(
+        executor_,
+        [self = shared_from_this(), status = std::move(status)]() mutable {
+            if (self->closed_ || self->responded_) {
+                return;
+            }
+            self->ctx_.trigger_cancel();
+            self->reader_impl_->queue_.SetError(status);
+            self->SendError(std::move(status));
+        });
+}
+
+void ClientStreamingCallState::OnClose() {
+    if (closed_) {
+        return;
+    }
+    closed_ = true;
+    MarkTerminal();
+    timer_.cancel();
+    if (!responded_) {
+        ctx_.trigger_cancel();
+        reader_impl_->queue_.SetError(
+            Status{StatusCode::CANCELLED, "client closed the stream"});
+        responded_ = true;
+    }
 }
 
 void ClientStreamingCallState::OnData(const uint8_t* data, std::size_t len) {

@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -15,6 +16,7 @@
 #include "rpcpio/internal/raw_server_writer.h"
 #include "src/server/client_streaming_call_state.h"  // StreamingFrameParser
 #include "src/server/raw_server_impls.h"
+#include "src/server/server_call_state_base.h"
 
 namespace rpcpio::internal {
 
@@ -35,7 +37,8 @@ using RawBidiStreamingHandler = std::function<
 //   4. When the handler returns, ensures Finish() is called on the writer
 //      to flush trailing headers.
 class BidiStreamingCallState
-    : public std::enable_shared_from_this<BidiStreamingCallState>
+    : public ServerCallStateBase,
+      public std::enable_shared_from_this<BidiStreamingCallState>
 {
 public:
     BidiStreamingCallState(
@@ -51,13 +54,15 @@ public:
     // Register on_data callback, send initial HTTP 200, arm generator, and
     // start the handler coroutine.
     void Start();
+    void Cancel(Status status) override;
 
 private:
     void OnData(const uint8_t* data, std::size_t len);
+    void OnClose();
     void SendError(Status status);
     void SendHeaders();
 
-    boost::asio::io_context&                       ioc_;
+    boost::asio::any_io_executor                   executor_;
     const nghttp2::asio_http2::server::request&    req_;
     const nghttp2::asio_http2::server::response&   resp_;
     RawBidiStreamingHandler                        handler_;
@@ -70,6 +75,7 @@ private:
     ServerContext             ctx_;
     boost::asio::steady_timer timer_;
     bool                      responded_{false};
+    bool                      closed_{false};
 
     std::shared_ptr<RawServerReaderImpl> reader_impl_;
     std::shared_ptr<RawServerWriterImpl> writer_impl_;

@@ -42,6 +42,16 @@ cc_test(
 )
 
 cc_test(
+    name = "server_shutdown_test",
+    srcs = ["server_shutdown_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//:rpcpio_runtime",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "strand_test",
     srcs = ["strand_test.cc"],
     copts = ["-std=c++20"],

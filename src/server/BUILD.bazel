@@ -19,6 +19,7 @@ cc_library(
         "call_state.h",
         "client_streaming_call_state.h",
         "raw_server_impls.h",
+        "server_call_state_base.h",
         "server_impl.h",
         "server_streaming_call_state.h",
     ],

@@ -5,6 +5,7 @@
 #include <nghttp2/nghttp2.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
 #include "rpcpio/internal/raw_server_reader.h"
 #include "rpcpio/internal/raw_server_writer.h"
@@ -26,7 +27,7 @@ BidiStreamingCallState::BidiStreamingCallState(
     std::size_t                                     max_metadata_size,
     std::size_t                                     max_response_size,
     std::string                                     peer_identity)
-    : ioc_(ioc)
+    : executor_(req.get_executor())
     , req_(req)
     , resp_(resp)
     , handler_(std::move(handler))
@@ -35,12 +36,17 @@ BidiStreamingCallState::BidiStreamingCallState(
     , max_response_size_(max_response_size)
     , peer_identity_(std::move(peer_identity))
     , parser_(max_message_size)
-    , timer_(ioc)
+    , timer_(executor_)
     , reader_impl_(std::make_shared<RawServerReaderImpl>(ioc))
     , writer_impl_(std::make_shared<RawServerWriterImpl>(resp, max_response_size))
 {}
 
 void BidiStreamingCallState::Start() {
+    auto self = shared_from_this();
+    resp_.on_close([self](std::uint32_t) {
+        self->OnClose();
+    });
+
     // Collect client metadata.
     MetadataMap client_meta;
     Status meta_status = protocol::Nghttp2HeadersToMetadata(
@@ -92,14 +98,14 @@ void BidiStreamingCallState::Start() {
     SendHeaders();
 
     // Register the DATA callback to feed incoming request messages.
-    auto self = shared_from_this();
+    self = shared_from_this();
     req_.on_data([self](const uint8_t* data, std::size_t len) {
         self->OnData(data, len);
     });
 
     // Start the handler coroutine; it interleaves Read() and Write() freely.
     boost::asio::co_spawn(
-        ioc_,
+        executor_,
         [self]() -> boost::asio::awaitable<void> {
             RawServerReader reader(self->reader_impl_);
             RawServerWriter writer(self->writer_impl_);
@@ -115,6 +121,38 @@ void BidiStreamingCallState::Start() {
             }
         },
         boost::asio::detached);
+}
+
+void BidiStreamingCallState::Cancel(Status status) {
+    boost::asio::dispatch(
+        executor_,
+        [self = shared_from_this(), status = std::move(status)]() mutable {
+            if (self->closed_ || self->writer_impl_->finished_) {
+                return;
+            }
+            self->ctx_.trigger_cancel();
+            self->reader_impl_->queue_.SetError(status);
+            if (self->responded_) {
+                self->writer_impl_->Finish(std::move(status));
+            } else {
+                self->SendError(std::move(status));
+            }
+        });
+}
+
+void BidiStreamingCallState::OnClose() {
+    if (closed_) {
+        return;
+    }
+    closed_ = true;
+    MarkTerminal();
+    timer_.cancel();
+    if (!writer_impl_->finished_) {
+        ctx_.trigger_cancel();
+        reader_impl_->queue_.SetError(
+            Status{StatusCode::CANCELLED, "client closed the stream"});
+        writer_impl_->finished_ = true;
+    }
 }
 
 void BidiStreamingCallState::OnData(const uint8_t* data, std::size_t len) {

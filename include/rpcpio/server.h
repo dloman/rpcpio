@@ -22,7 +22,10 @@ namespace rpcpio {
 namespace internal { class ServerImpl; }
 
 struct ServerOptions {
-    std::uint32_t num_threads{4};
+    // By default the server uses the caller's io_context and starts no
+    // threads. A nonzero value gives the server a private io_context with
+    // this many workers; Shutdown never stops the caller's context.
+    std::uint32_t num_threads{0};
 
     // TLS (supply both cert and key to enable)
     std::string server_cert_file;
@@ -151,10 +154,12 @@ public:
     // Valid only after a successful Start() call.
     std::uint16_t bound_port() const noexcept;
 
-    // Graceful shutdown: stop accepting, drain active calls, join workers.
+    // Stop accepting and cancel active calls. This never stops a caller-owned
+    // io_context and may be called from a handler or any other thread.
     void Shutdown();
 
-    // Block the calling thread until Shutdown() completes.
+    // Join private worker threads after Shutdown(). A server using the
+    // caller's io_context has no workers to join.
     void Wait();
 
     Server(const Server&)            = delete;

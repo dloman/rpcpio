@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -12,6 +13,7 @@
 #include "rpcpio/status.h"
 #include "src/protocol/compression.h"
 #include "src/protocol/framing.h"
+#include "src/server/server_call_state_base.h"
 
 namespace rpcpio::internal {
 
@@ -23,7 +25,9 @@ using RawHandler = std::function<
 // Manages one inbound unary call.  Created for each HTTP/2 stream that passes
 // basic gRPC validation.  Lifetime is tied to the nghttp2-asio request/response
 // pair; it must not outlive the server session.
-class ServerCallState : public std::enable_shared_from_this<ServerCallState> {
+class ServerCallState
+    : public ServerCallStateBase,
+      public std::enable_shared_from_this<ServerCallState> {
 public:
     ServerCallState(boost::asio::io_context&              ioc,
                     const nghttp2::asio_http2::server::request&  req,
@@ -36,10 +40,12 @@ public:
 
     // Begin receiving request data and, once complete, dispatch the handler.
     void Start();
+    void Cancel(Status status) override;
 
 private:
     void OnData(const uint8_t* data, std::size_t len);
     void OnRequestEnd();
+    void OnClose();
     void SendError(Status status);
 
     // Sends HTTP 200 + initial headers, then DATA (via generator callback),
@@ -48,7 +54,7 @@ private:
                       const MetadataMap& initial_meta,
                       const MetadataMap& trailing_meta);
 
-    boost::asio::io_context&                       ioc_;
+    boost::asio::any_io_executor                   executor_;
     const nghttp2::asio_http2::server::request&    req_;
     const nghttp2::asio_http2::server::response&   resp_;
     RawHandler                                     handler_;
@@ -62,6 +68,7 @@ private:
     ServerContext                    ctx_;
     boost::asio::steady_timer        timer_;
     bool                             responded_{false};
+    bool                             closed_{false};
 };
 
 } // namespace rpcpio::internal

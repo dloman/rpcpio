@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -14,6 +15,7 @@
 #include "rpcpio/internal/raw_server_writer.h"
 #include "src/protocol/framing.h"
 #include "src/server/raw_server_impls.h"
+#include "src/server/server_call_state_base.h"
 
 namespace rpcpio::internal {
 
@@ -33,7 +35,8 @@ using RawServerStreamingHandler = std::function<
 //   4. Co-spawns the handler coroutine with a RawServerWriter handle.
 //   5. On handler return (or exception), ensures Finish() is called.
 class ServerStreamingCallState
-    : public std::enable_shared_from_this<ServerStreamingCallState>
+    : public ServerCallStateBase,
+      public std::enable_shared_from_this<ServerStreamingCallState>
 {
 public:
     ServerStreamingCallState(
@@ -48,16 +51,18 @@ public:
 
     // Register on_data callback and begin receiving the request body.
     void Start();
+    void Cancel(Status status) override;
 
 private:
     void OnData(const uint8_t* data, std::size_t len);
     void OnRequestEnd();
+    void OnClose();
     void SendError(Status status);
 
     // Send HTTP 200 + initial headers and arm the generator callback.
     void SendHeaders();
 
-    boost::asio::io_context&                       ioc_;
+    boost::asio::any_io_executor                   executor_;
     const nghttp2::asio_http2::server::request&    req_;
     const nghttp2::asio_http2::server::response&   resp_;
     RawServerStreamingHandler                      handler_;
@@ -70,6 +75,7 @@ private:
     ServerContext             ctx_;
     boost::asio::steady_timer timer_;
     bool                      responded_{false};
+    bool                      closed_{false};
 
     // Shared with RawServerWriter handed to the handler coroutine.
     std::shared_ptr<RawServerWriterImpl> writer_impl_;

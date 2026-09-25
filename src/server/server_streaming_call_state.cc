@@ -5,6 +5,7 @@
 #include <nghttp2/nghttp2.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
 #include "rpcpio/internal/raw_server_writer.h"
 #include "src/protocol/compression.h"
@@ -26,7 +27,7 @@ ServerStreamingCallState::ServerStreamingCallState(
     std::size_t                                     max_metadata_size,
     std::size_t                                     max_response_size,
     std::string                                     peer_identity)
-    : ioc_(ioc)
+    : executor_(req.get_executor())
     , req_(req)
     , resp_(resp)
     , handler_(std::move(handler))
@@ -35,11 +36,16 @@ ServerStreamingCallState::ServerStreamingCallState(
     , max_response_size_(max_response_size)
     , peer_identity_(std::move(peer_identity))
     , decoder_(max_request_size)
-    , timer_(ioc)
+    , timer_(executor_)
     , writer_impl_(std::make_shared<RawServerWriterImpl>(resp, max_response_size))
 {}
 
 void ServerStreamingCallState::Start() {
+    auto self = shared_from_this();
+    resp_.on_close([self](std::uint32_t) {
+        self->OnClose();
+    });
+
     // Collect client metadata.
     MetadataMap client_meta;
     Status meta_status = protocol::Nghttp2HeadersToMetadata(
@@ -81,10 +87,39 @@ void ServerStreamingCallState::Start() {
     }
 
     // Register DATA callback to accumulate the (single) request message.
-    auto self = shared_from_this();
+    self = shared_from_this();
     req_.on_data([self](const uint8_t* data, std::size_t len) {
         self->OnData(data, len);
     });
+}
+
+void ServerStreamingCallState::Cancel(Status status) {
+    boost::asio::dispatch(
+        executor_,
+        [self = shared_from_this(), status = std::move(status)]() mutable {
+            if (self->closed_ || self->writer_impl_->finished_) {
+                return;
+            }
+            self->ctx_.trigger_cancel();
+            if (self->responded_) {
+                self->writer_impl_->Finish(std::move(status));
+            } else {
+                self->SendError(std::move(status));
+            }
+        });
+}
+
+void ServerStreamingCallState::OnClose() {
+    if (closed_) {
+        return;
+    }
+    closed_ = true;
+    MarkTerminal();
+    timer_.cancel();
+    if (!writer_impl_->finished_) {
+        ctx_.trigger_cancel();
+        writer_impl_->finished_ = true;
+    }
 }
 
 void ServerStreamingCallState::OnData(const uint8_t* data, std::size_t len) {
@@ -130,7 +165,7 @@ void ServerStreamingCallState::OnRequestEnd() {
 
     auto self = shared_from_this();
     boost::asio::co_spawn(
-        ioc_,
+        executor_,
         [self, req_bytes = std::move(req_bytes)]()
                 -> boost::asio::awaitable<void> {
             RawServerWriter writer(self->writer_impl_);

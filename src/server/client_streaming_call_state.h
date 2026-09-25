@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -18,6 +19,7 @@
 #include "rpcpio/status.h"
 #include "rpcpio/internal/raw_server_reader.h"
 #include "src/server/raw_server_impls.h"
+#include "src/server/server_call_state_base.h"
 
 namespace rpcpio::internal {
 
@@ -120,7 +122,8 @@ private:
 //   4. When the handler returns, sends the response exactly once (same path as
 //      the unary ServerCallState).
 class ClientStreamingCallState
-    : public std::enable_shared_from_this<ClientStreamingCallState>
+    : public ServerCallStateBase,
+      public std::enable_shared_from_this<ClientStreamingCallState>
 {
 public:
     ClientStreamingCallState(
@@ -135,16 +138,18 @@ public:
 
     // Register on_data callback and start the handler coroutine.
     void Start();
+    void Cancel(Status status) override;
 
 private:
     void OnData(const uint8_t* data, std::size_t len);
+    void OnClose();
     void SendError(Status status);
     void SendResponse(const Status&      status,
                       std::string_view   resp_bytes,
                       const MetadataMap& initial_meta,
                       const MetadataMap& trailing_meta);
 
-    boost::asio::io_context&                       ioc_;
+    boost::asio::any_io_executor                   executor_;
     const nghttp2::asio_http2::server::request&    req_;
     const nghttp2::asio_http2::server::response&   resp_;
     RawClientStreamingHandler                      handler_;
@@ -157,6 +162,7 @@ private:
     ServerContext             ctx_;
     boost::asio::steady_timer timer_;
     bool                      responded_{false};
+    bool                      closed_{false};
 
     // Shared with the RawServerReader handed to the handler coroutine.
     std::shared_ptr<RawServerReaderImpl> reader_impl_;

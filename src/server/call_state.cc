@@ -5,6 +5,7 @@
 #include <nghttp2/nghttp2.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
 #include "src/protocol/compression.h"
 #include "src/protocol/framing.h"
@@ -23,7 +24,7 @@ ServerCallState::ServerCallState(
     std::size_t                                      max_metadata_size,
     std::size_t                                      max_response_size,
     std::string                                      peer_identity)
-    : ioc_(ioc)
+    : executor_(req.get_executor())
     , req_(req)
     , resp_(resp)
     , handler_(std::move(handler))
@@ -32,10 +33,15 @@ ServerCallState::ServerCallState(
     , max_response_size_(max_response_size)
     , peer_identity_(std::move(peer_identity))
     , decoder_(max_request_size)
-    , timer_(ioc)
+    , timer_(executor_)
 {}
 
 void ServerCallState::Start() {
+    auto self = shared_from_this();
+    resp_.on_close([self](std::uint32_t) {
+        self->OnClose();
+    });
+
     // Collect client metadata (skip HTTP pseudo-headers and gRPC reserved ones).
     MetadataMap client_meta;
     Status meta_status = protocol::Nghttp2HeadersToMetadata(
@@ -89,10 +95,35 @@ void ServerCallState::Start() {
     }
 
     // Register the DATA callback to accumulate the request body.
-    auto self = shared_from_this();
+    self = shared_from_this();
     req_.on_data([self](const uint8_t* data, std::size_t len) {
         self->OnData(data, len);
     });
+}
+
+void ServerCallState::Cancel(Status status) {
+    boost::asio::dispatch(
+        executor_,
+        [self = shared_from_this(), status = std::move(status)]() mutable {
+            if (self->closed_ || self->responded_) {
+                return;
+            }
+            self->ctx_.trigger_cancel();
+            self->SendError(std::move(status));
+        });
+}
+
+void ServerCallState::OnClose() {
+    if (closed_) {
+        return;
+    }
+    closed_ = true;
+    MarkTerminal();
+    timer_.cancel();
+    if (!responded_) {
+        ctx_.trigger_cancel();
+        responded_ = true;
+    }
 }
 
 void ServerCallState::OnData(const uint8_t* data, std::size_t len) {
@@ -144,7 +175,7 @@ void ServerCallState::OnRequestEnd() {
 
     // Run the handler as a C++20 coroutine on the server's executor.
     boost::asio::co_spawn(
-        ioc_,
+        executor_,
         [self, req_bytes = std::move(req_bytes)]()
                 -> boost::asio::awaitable<void> {
             std::string resp_bytes;
