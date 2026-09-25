@@ -38,7 +38,9 @@ struct ServerOptions {
     // Graceful shutdown: wait up to this long for active calls to finish.
     std::chrono::seconds grace_period{30};
 
-    // Per-call limits (bytes)
+    // Per-call limits (bytes). The response limit applies to each
+    // uncompressed protobuf message; compressed responses have no separate
+    // compressed-size limit.
     std::size_t max_request_message_size{4 * 1024 * 1024};
     std::size_t max_response_message_size{4 * 1024 * 1024};
     std::size_t max_metadata_size{8192};

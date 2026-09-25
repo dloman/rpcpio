@@ -769,6 +769,26 @@ void ChannelImpl::SubmitServerStreamingCall(
                 static_cast<std::int32_t>(req->stream_id());
             self->active_streaming_calls_.emplace(stream_id,
                 [call](Status s) { call->Fail(std::move(s)); });
+            if (ctx) {
+                ctx->cancellation_slot().assign(
+                    [weak_self = std::weak_ptr<ChannelImpl>(self),
+                     call,
+                     req,
+                     stream_id](boost::asio::cancellation_type) {
+                        if (auto self = weak_self.lock()) {
+                            boost::asio::dispatch(
+                                self->strand_,
+                                [self, call, req, stream_id] {
+                                    if (!self->active_streaming_calls_.contains(
+                                            stream_id)) {
+                                        return;
+                                    }
+                                    req->cancel(NGHTTP2_CANCEL);
+                                    call->Cancel();
+                                });
+                        }
+                    });
+            }
 
             req->on_response([call](
                     const nghttp2::asio_http2::client::response& resp) {
@@ -896,6 +916,26 @@ void ChannelImpl::SubmitClientStreamingCall(
                 static_cast<std::int32_t>(req->stream_id());
             self->active_streaming_calls_.emplace(stream_id,
                 [call](Status s) { call->Fail(std::move(s)); });
+            if (ctx) {
+                ctx->cancellation_slot().assign(
+                    [weak_self = std::weak_ptr<ChannelImpl>(self),
+                     call,
+                     req,
+                     stream_id](boost::asio::cancellation_type) {
+                        if (auto self = weak_self.lock()) {
+                            boost::asio::dispatch(
+                                self->strand_,
+                                [self, call, req, stream_id] {
+                                    if (!self->active_streaming_calls_.contains(
+                                            stream_id)) {
+                                        return;
+                                    }
+                                    req->cancel(NGHTTP2_CANCEL);
+                                    call->Cancel();
+                                });
+                        }
+                    });
+            }
 
             req->on_response(
                 [call](const nghttp2::asio_http2::client::response& resp) {
@@ -997,6 +1037,26 @@ void ChannelImpl::SubmitBidiStreamingCall(
                 static_cast<std::int32_t>(req->stream_id());
             self->active_streaming_calls_.emplace(stream_id,
                 [call](Status s) { call->Fail(std::move(s)); });
+            if (ctx) {
+                ctx->cancellation_slot().assign(
+                    [weak_self = std::weak_ptr<ChannelImpl>(self),
+                     call,
+                     req,
+                     stream_id](boost::asio::cancellation_type) {
+                        if (auto self = weak_self.lock()) {
+                            boost::asio::dispatch(
+                                self->strand_,
+                                [self, call, req, stream_id] {
+                                    if (!self->active_streaming_calls_.contains(
+                                            stream_id)) {
+                                        return;
+                                    }
+                                    req->cancel(NGHTTP2_CANCEL);
+                                    call->Cancel();
+                                });
+                        }
+                    });
+            }
 
             req->on_response(
                 [call](const nghttp2::asio_http2::client::response& resp) {
