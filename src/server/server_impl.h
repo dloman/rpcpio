@@ -71,6 +71,8 @@ private:
     std::vector<std::thread>  threads_;
     std::atomic<bool>         shutdown_{false};
     std::atomic<bool>         started_{false};
+    // nghttp2's server::stop() dereferences state that only listen_and_serve creates.
+    std::atomic<bool>         listening_{false};
     std::uint16_t             bound_port_{0};
 };
 

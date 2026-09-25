@@ -127,6 +127,7 @@ rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
 
     if (ec) return Status{StatusCode::UNAVAILABLE,
                           "server listen failed: " + ec.message()};
+    listening_ = true;
 
     // Spin up worker threads.
     for (std::uint32_t i = 0; i < opts_.num_threads; ++i) {
@@ -138,7 +139,7 @@ rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
 
 void ServerImpl::Shutdown() {
     if (shutdown_.exchange(true)) return;
-    http2_.stop();
+    if (listening_) http2_.stop();
     ioc_.stop();
     for (auto& t : threads_) {
         if (t.joinable()) t.join();
