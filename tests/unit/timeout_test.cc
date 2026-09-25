@@ -38,13 +38,22 @@ TEST(FormatTimeout, Hours) {
     EXPECT_EQ(FormatTimeout(3'600'000'000'000ns), "1H");
 }
 
-TEST(FormatTimeout, RoundsOutward) {
-    // 1001 nanoseconds should not be shortened to 1 microsecond.
-    auto result = FormatTimeout(1001ns);
-    // Should be 1001n (fits in 8 digits as nanoseconds) or 2u (ceiling microseconds).
-    // 1001 ns ceiling to microseconds = 2 us.  Our code picks coarsest unit.
-    // ceil(1001/1000) = 2, 2 <= 99999999 → "2u"
-    EXPECT_EQ(result, "2u");
+TEST(FormatTimeout, KeepsPrecisionWhenItFits) {
+    EXPECT_EQ(FormatTimeout(1001ns), "1001n");
+}
+
+TEST(FormatTimeout, RoundsUpWhenCoarseningToFit) {
+    // 100000001 ns needs 9 digits in nanoseconds; microseconds round up.
+    EXPECT_EQ(FormatTimeout(100'000'001ns), "100001u");
+}
+
+TEST(FormatTimeout, UsesExactCoarserUnit) {
+    EXPECT_EQ(FormatTimeout(90'000'000'000ns), "90S");
+    EXPECT_EQ(FormatTimeout(7'200'000'000'000ns), "2H");
+}
+
+TEST(FormatTimeout, LargestDurationRoundsUpToHours) {
+    EXPECT_EQ(FormatTimeout(std::chrono::nanoseconds::max()), "2562048H");
 }
 
 TEST(FormatTimeout, MaxDigitsNanoseconds) {
