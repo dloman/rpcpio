@@ -144,14 +144,11 @@ public:
                  ClientContext&   ctx,
                  std::string_view request_bytes);
 
-private:
-    // Pair of raw handles returned by BidiStreamingCallRaw.
+    // Raw streaming counterparts of the typed calls above, on the same terms.
     struct RawBidiHandles {
         internal::RawClientReader reader;
         internal::RawClientWriter writer;
     };
-
-    // Type-erased streaming calls; implemented in channel_impl.cc.
 
     boost::asio::awaitable<internal::RawClientReader>
     ServerStreamingCallRaw(std::string_view path,
@@ -166,6 +163,7 @@ private:
     BidiStreamingCallRaw(std::string_view path,
                          ClientContext&   ctx);
 
+private:
     std::shared_ptr<internal::ChannelImpl> impl_;
 };
 

@@ -802,12 +802,12 @@ void Channel::Shutdown() {
 boost::asio::awaitable<void> Channel::Connect() {
     auto impl = impl_;
     co_await boost::asio::async_initiate<
-        boost::asio::use_awaitable_t<>,
+        const boost::asio::use_awaitable_t<>&,
         void(boost::system::error_code)>(
         [impl](auto handler) {
-            impl->Connect([h = std::move(handler)](
+            impl->Connect([h = std::make_shared<decltype(handler)>(std::move(handler))](
                     boost::system::error_code ec) mutable {
-                std::move(h)(ec);
+                std::move(*h)(ec);
             });
         },
         boost::asio::use_awaitable);
@@ -823,15 +823,15 @@ Channel::UnaryCallRaw(std::string_view path,
     std::string req_str{req_bytes};
 
     co_return co_await boost::asio::async_initiate<
-        boost::asio::use_awaitable_t<>,
+        const boost::asio::use_awaitable_t<>&,
         void(internal::UnaryResultRaw)>(
         [impl, path_str, req_str, &ctx](auto handler) mutable {
             impl->SubmitCall(
                 std::move(path_str),
                 &ctx,
                 std::move(req_str),
-                [h = std::move(handler)](internal::UnaryResultRaw r) mutable {
-                    std::move(h)(std::move(r));
+                [h = std::make_shared<decltype(handler)>(std::move(handler))](internal::UnaryResultRaw r) mutable {
+                    std::move(*h)(std::move(r));
                 });
         },
         boost::asio::use_awaitable);
@@ -847,15 +847,15 @@ Channel::ServerStreamingCallRaw(std::string_view path,
     std::string req_str{req_bytes};
 
     co_return co_await boost::asio::async_initiate<
-        boost::asio::use_awaitable_t<>,
+        const boost::asio::use_awaitable_t<>&,
         void(internal::RawClientReader)>(
         [impl, path_str, req_str, &ctx](auto handler) mutable {
             impl->SubmitServerStreamingCall(
                 std::move(path_str),
                 &ctx,
                 std::move(req_str),
-                [h = std::move(handler)](internal::RawClientReader r) mutable {
-                    std::move(h)(std::move(r));
+                [h = std::make_shared<decltype(handler)>(std::move(handler))](internal::RawClientReader r) mutable {
+                    std::move(*h)(std::move(r));
                 });
         },
         boost::asio::use_awaitable);
@@ -869,14 +869,14 @@ Channel::ClientStreamingCallRaw(std::string_view path,
     std::string path_str{path};
 
     co_return co_await boost::asio::async_initiate<
-        boost::asio::use_awaitable_t<>,
+        const boost::asio::use_awaitable_t<>&,
         void(internal::RawClientWriter)>(
         [impl, path_str, &ctx](auto handler) mutable {
             impl->SubmitClientStreamingCall(
                 std::move(path_str),
                 &ctx,
-                [h = std::move(handler)](internal::RawClientWriter w) mutable {
-                    std::move(h)(std::move(w));
+                [h = std::make_shared<decltype(handler)>(std::move(handler))](internal::RawClientWriter w) mutable {
+                    std::move(*h)(std::move(w));
                 });
         },
         boost::asio::use_awaitable);
@@ -890,15 +890,15 @@ Channel::BidiStreamingCallRaw(std::string_view path,
     std::string path_str{path};
 
     co_return co_await boost::asio::async_initiate<
-        boost::asio::use_awaitable_t<>,
+        const boost::asio::use_awaitable_t<>&,
         void(Channel::RawBidiHandles)>(
         [impl, path_str, &ctx](auto handler) mutable {
             impl->SubmitBidiStreamingCall(
                 std::move(path_str),
                 &ctx,
-                [h = std::move(handler)](
+                [h = std::make_shared<decltype(handler)>(std::move(handler))](
                         internal::ChannelImpl::BidiHandles bh) mutable {
-                    std::move(h)(Channel::RawBidiHandles{
+                    std::move(*h)(Channel::RawBidiHandles{
                         std::move(bh.reader), std::move(bh.writer)});
                 });
         },

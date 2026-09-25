@@ -76,7 +76,10 @@ TEST_F(InteropClientTest, LargeUnary) {
         request.set_response_size(314159);
         request.mutable_payload()->set_body(std::string(271828, '\0'));
         auto result = co_await stub_->UnaryCall(ctx, request);
-        ASSERT_TRUE(result.status.ok()) << result.status.DebugString();
+        if (!result.status.ok()) {
+            ADD_FAILURE() << result.status.DebugString();
+            co_return;
+        }
         EXPECT_EQ(result.response->payload().body().size(), 314159u);
     });
 }
@@ -107,7 +110,10 @@ TEST_F(InteropClientTest, CustomMetadata) {
         grpc::testing::SimpleRequest request;
         request.set_response_size(1);
         auto result = co_await stub_->UnaryCall(ctx, request);
-        ASSERT_TRUE(result.status.ok()) << result.status.DebugString();
+        if (!result.status.ok()) {
+            ADD_FAILURE() << result.status.DebugString();
+            co_return;
+        }
 
         // Check that the server echoed the initial metadata.
         EXPECT_EQ(result.initial_metadata.count("x-grpc-test-echo-initial"), 1u);
