@@ -5,8 +5,8 @@ cc_binary(
     srcs = [
         "rpcpio_cpp_plugin.cpp",
         "cpp_generator.cc",
+        "cpp_generator.h",
     ],
-    hdrs = ["cpp_generator.h"],
     copts = ["-std=c++20"],
     deps = [
         "@protobuf//:protoc_lib",

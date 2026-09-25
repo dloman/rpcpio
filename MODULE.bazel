@@ -2,15 +2,22 @@ module(
     name = "rpcpio",
     version = "0.1.0",
     compatibility_level = 1,
+    bazel_compatibility = [">=8.7.0"],
 )
 
 # ── Core transport ────────────────────────────────────────────────────────────
-# Provides @nghttp2-asio//:nghttp2_asio, which bundles:
-#   • CESNET/nghttp2-asio (with trailer + GOAWAY extensions)
-#   • Boost 1.90 (Asio, Thread, DateTime)
-#   • libnghttp2 1.65.0
-#   • OpenSSL 3.5.5
-bazel_dep(name = "nghttp2-asio", version = "0.0.90-20260225-464f056")
+# Provides @nghttp2-asio//:nghttp2_asio: dloman/nghttp2-asio (externally driven
+# io_context/executor, trailers, GOAWAY) on libnghttp2 and OpenSSL.
+bazel_dep(name = "nghttp2-asio", version = "0.0.91")
+bazel_dep(name = "boost.asio", version = "1.87.0")
+
+# nghttp2-asio 0.0.91 is not published to a registry. Overrides only apply when
+# rpcpio is the root module; consumers must supply their own.
+git_override(
+    module_name = "nghttp2-asio",
+    commit = "2e4312f9cb1cb10a0a1d32542456c84465484307",
+    remote = "https://github.com/dloman/nghttp2-asio.git",
+)
 
 # ── Protobuf runtime and compiler ────────────────────────────────────────────
 bazel_dep(name = "protobuf", version = "27.3")
