@@ -7,6 +7,7 @@
 #include <string_view>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <nghttp2/asio_http2_client.h>
 #include "rpcpio/status.h"
 #include "src/protocol/stream_queue.h"
@@ -38,13 +39,22 @@ struct RawClientReaderImpl {
 // ── RawClientWriterImpl ──────────────────────────────────────────────────────
 // Used by client-streaming and bidi client call states.
 // Holds the LPM-frame queue; a generator callback drains it.
-// req_ is set by the call state after session_->submit() succeeds.
-struct RawClientWriterImpl {
-    explicit RawClientWriterImpl(boost::asio::io_context& ioc)
-        : status_timer_(ioc, std::chrono::steady_clock::time_point::max())
+//
+// The generator and request::resume() run inside the nghttp2 session, so
+// req_, pending_, offset_ and writes_done_ are only touched on strand_.
+struct RawClientWriterImpl
+    : std::enable_shared_from_this<RawClientWriterImpl> {
+    RawClientWriterImpl(
+            boost::asio::io_context& ioc,
+            boost::asio::strand<boost::asio::io_context::executor_type> strand)
+        : strand_(std::move(strand))
+        , status_timer_(ioc, std::chrono::steady_clock::time_point::max())
     {}
 
-    // Set by the call state after submit() returns.
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+
+    // Set once submit() succeeds and cleared when the stream closes, because
+    // nghttp2-asio frees the request at close.
     const nghttp2::asio_http2::client::request* req_{nullptr};
 
     std::deque<std::string> pending_;   // LPM-encoded frames to send
@@ -69,6 +79,9 @@ struct RawClientWriterImpl {
     // Encode proto_bytes as an LPM frame, enqueue it, and wake the generator.
     // Returns non-OK if the message is too large to frame.
     Status Enqueue(std::string_view proto_bytes);
+
+    // Mark the request stream half-closed once queued frames are sent.
+    void MarkWritesDone();
 };
 
 } // namespace rpcpio::internal

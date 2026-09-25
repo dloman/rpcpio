@@ -264,6 +264,46 @@ TEST_F(InteropServerTest, ClientStreamingCall) {
     EXPECT_EQ(result.response->payload().body().size(), 60u);
 }
 
+// On an established connection the data generator runs before the first
+// Write(), so later writes must be able to wake it.
+TEST_F(InteropServerTest, ClientStreamingCallsShareOneChannel) {
+    boost::asio::io_context client_ioc;
+
+    rpcpio::ChannelOptions copts;
+    copts.use_h2c = true;
+    auto channel = std::make_shared<rpcpio::Channel>(
+        client_ioc, "127.0.0.1", port_, copts);
+
+    grpc::testing::TestServiceStub stub(channel);
+
+    std::vector<rpcpio::UnaryResult<grpc::testing::SimpleResponse>> results(2);
+
+    boost::asio::co_spawn(
+        client_ioc,
+        [&]() -> boost::asio::awaitable<void> {
+            for (auto& result : results) {
+                rpcpio::ClientContext ctx;
+                auto writer = co_await stub.StreamingInputCall(ctx);
+                for (int i = 1; i <= 3; ++i) {
+                    grpc::testing::SimpleRequest req;
+                    req.set_response_size(i * 10);
+                    co_await writer.Write(req);
+                }
+                co_await writer.WritesDone();
+                result = co_await writer.FinishAndGetResponse();
+            }
+        },
+        [channel](std::exception_ptr) { channel->Shutdown(); });
+
+    client_ioc.run();
+
+    for (const auto& result : results) {
+        EXPECT_TRUE(result.status.ok()) << result.status.message();
+        ASSERT_TRUE(result.response.has_value());
+        EXPECT_EQ(result.response->payload().body().size(), 60u);
+    }
+}
+
 TEST_F(InteropServerTest, BidiStreamingCall) {
     boost::asio::io_context client_ioc;
 

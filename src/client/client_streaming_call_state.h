@@ -28,10 +28,9 @@ public:
                                    boost::asio::strand<boost::asio::io_context::executor_type> strand,
                                    ClientContext*           ctx);
 
-    // Called by ChannelImpl after session_->submit() returns the request and
-    // response objects.  Sets req_ on writer_impl_ and registers callbacks.
-    void Attach(const nghttp2::asio_http2::client::request* req,
-                const nghttp2::asio_http2::client::response&          resp);
+    // Called by ChannelImpl when the response headers arrive; validates them
+    // and registers the data and trailer callbacks.
+    void Attach(const nghttp2::asio_http2::client::response& resp);
 
     // Arm the deadline timer (call once, after Attach).
     void ArmTimer();

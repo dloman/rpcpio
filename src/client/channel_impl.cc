@@ -655,15 +655,16 @@ void ChannelImpl::SubmitClientStreamingCall(
                 return;
             }
 
+            writer_impl->req_ = req;
+
             const auto stream_id =
                 static_cast<std::int32_t>(req->stream_id());
             self->active_streaming_calls_.emplace(stream_id,
                 [call](Status s) { call->Fail(std::move(s)); });
 
-            // Capture req in on_response so it stays alive until Attach() is called.
             req->on_response(
-                [call, req](const nghttp2::asio_http2::client::response& resp) {
-                    call->Attach(req, resp);
+                [call](const nghttp2::asio_http2::client::response& resp) {
+                    call->Attach(resp);
                 });
             req->on_close([self, call, stream_id](uint32_t error_code) {
                 boost::asio::post(self->strand_,
@@ -755,14 +756,16 @@ void ChannelImpl::SubmitBidiStreamingCall(
                 return;
             }
 
+            writer_impl->req_ = req;
+
             const auto stream_id =
                 static_cast<std::int32_t>(req->stream_id());
             self->active_streaming_calls_.emplace(stream_id,
                 [call](Status s) { call->Fail(std::move(s)); });
 
             req->on_response(
-                [call, req](const nghttp2::asio_http2::client::response& resp) {
-                    call->Attach(req, resp);
+                [call](const nghttp2::asio_http2::client::response& resp) {
+                    call->Attach(resp);
                 });
             req->on_close([self, call, stream_id](uint32_t error_code) {
                 boost::asio::post(self->strand_,

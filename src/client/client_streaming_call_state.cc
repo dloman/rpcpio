@@ -17,7 +17,7 @@ ClientStreamingClientCallState::ClientStreamingClientCallState(
         boost::asio::io_context& ioc,
         boost::asio::strand<boost::asio::io_context::executor_type> strand,
         ClientContext*           ctx)
-    : writer_impl_(std::make_shared<RawClientWriterImpl>(ioc))
+    : writer_impl_(std::make_shared<RawClientWriterImpl>(ioc, strand))
     , ioc_(ioc)
     , strand_(std::move(strand))
     , ctx_(ctx)
@@ -53,6 +53,7 @@ void ClientStreamingClientCallState::Fail(Status s) {
 }
 
 void ClientStreamingClientCallState::OnStreamClose(uint32_t error_code) {
+    writer_impl_->req_ = nullptr;
     if (closed_.exchange(true)) return;
     timer_.cancel();
 
@@ -77,12 +78,8 @@ void ClientStreamingClientCallState::MaybeDeliverStatus(Status s) {
 }
 
 void ClientStreamingClientCallState::Attach(
-        const nghttp2::asio_http2::client::request* req,
-        const nghttp2::asio_http2::client::response&          resp)
+        const nghttp2::asio_http2::client::response& resp)
 {
-    // Store the request handle so Write()/WritesDone() can call resume().
-    writer_impl_->req_ = req;
-
     // Validate content-type.
     auto ct_it = resp.header().find("content-type");
     bool is_grpc = ct_it != resp.header().end() &&
@@ -195,8 +192,7 @@ RawClientWriter::Write(std::string_view proto_bytes) {
 
 boost::asio::awaitable<void>
 RawClientWriter::WritesDone() {
-    impl_->writes_done_ = true;
-    if (impl_->req_) impl_->req_->resume();
+    impl_->MarkWritesDone();
     co_return;
 }
 
