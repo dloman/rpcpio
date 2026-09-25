@@ -99,7 +99,7 @@ void ChannelImpl::DoConnect() {
 
         // Create session and store in connecting_session_ before callbacks.
         auto sess = std::make_shared<nghttp2::asio_http2::client::session>(
-            ioc_, *ssl_ctx, host_, std::to_string(port_));
+            strand_, *ssl_ctx, host_, std::to_string(port_));
         connecting_session_ = sess;
 
         sess->on_connect([self, sess, ssl_ctx](
@@ -134,7 +134,7 @@ void ChannelImpl::DoConnect() {
     } else {
         // h2c prior-knowledge (plaintext)
         auto sess = std::make_shared<nghttp2::asio_http2::client::session>(
-            ioc_, host_, std::to_string(port_));
+            strand_, host_, std::to_string(port_));
         connecting_session_ = sess;
 
         sess->on_connect([self, sess](boost::asio::ip::tcp::endpoint) mutable {
@@ -200,6 +200,12 @@ void ChannelImpl::DoShutdown() {
     active_streaming_calls_.clear();
 
     FailAll(cancelled);
+}
+
+std::string ChannelImpl::RequestUri(std::string_view path) const {
+    const bool tls = opts_.use_tls && !opts_.use_h2c;
+    return std::string(tls ? "https://" : "http://") + host_ + ":" +
+           std::to_string(port_) + std::string(path);
 }
 
 void ChannelImpl::Shutdown() {
@@ -330,8 +336,6 @@ void ChannelImpl::SubmitCall(std::string                         path,
                 nghttp2::asio_http2::header_value{"application/grpc+proto", false});
             hdrs.emplace("te",
                 nghttp2::asio_http2::header_value{"trailers", false});
-            hdrs.emplace(":authority",
-                nghttp2::asio_http2::header_value{self->host_, false});
             hdrs.emplace("user-agent",
                 nghttp2::asio_http2::header_value{self->opts_.user_agent, false});
 
@@ -372,7 +376,7 @@ void ChannelImpl::SubmitCall(std::string                         path,
 
             boost::system::error_code ec;
             auto req = self->session_->submit(
-                ec, "POST", std::move(path), frame, hdrs);
+                ec, "POST", self->RequestUri(path), frame, hdrs);
             if (ec) {
                 call->Fail(Status{
                     protocol::AsioErrorToStatusCode(ec.value(), false),
@@ -407,7 +411,6 @@ void ChannelImpl::SubmitCall(std::string                         path,
 // Returns true on success, false if the deadline has already passed.
 // On false, out_err is set to the deadline-exceeded status.
 static bool BuildStreamingGrpcHeaders(
-        const std::string&               host,
         const ChannelOptions&            opts,
         ClientContext*                   ctx,
         nghttp2::asio_http2::header_map& hdrs,
@@ -417,8 +420,6 @@ static bool BuildStreamingGrpcHeaders(
         nghttp2::asio_http2::header_value{"application/grpc+proto", false});
     hdrs.emplace("te",
         nghttp2::asio_http2::header_value{"trailers", false});
-    hdrs.emplace(":authority",
-        nghttp2::asio_http2::header_value{host, false});
     hdrs.emplace("user-agent",
         nghttp2::asio_http2::header_value{opts.user_agent, false});
 
@@ -495,7 +496,7 @@ void ChannelImpl::SubmitServerStreamingCall(
             {
                 Status err;
                 if (!BuildStreamingGrpcHeaders(
-                        self->host_, self->opts_, ctx, hdrs, err)) {
+                        self->opts_, ctx, hdrs, err)) {
                     auto call = std::make_shared<ServerStreamingClientCallState>(
                         self->ioc_, self->strand_, ctx);
                     call->Fail(std::move(err));
@@ -520,7 +521,7 @@ void ChannelImpl::SubmitServerStreamingCall(
 
             boost::system::error_code ec;
             auto req = self->session_->submit(
-                ec, "POST", std::move(path), frame, hdrs);
+                ec, "POST", self->RequestUri(path), frame, hdrs);
             if (ec) {
                 call->Fail(Status{
                     protocol::AsioErrorToStatusCode(ec.value(), false),
@@ -623,7 +624,7 @@ void ChannelImpl::SubmitClientStreamingCall(
             {
                 Status err;
                 if (!BuildStreamingGrpcHeaders(
-                        self->host_, self->opts_, ctx, hdrs, err)) {
+                        self->opts_, ctx, hdrs, err)) {
                     auto call = std::make_shared<ClientStreamingClientCallState>(
                         self->ioc_, self->strand_, ctx);
                     call->Fail(std::move(err));
@@ -639,7 +640,7 @@ void ChannelImpl::SubmitClientStreamingCall(
             // Submit with a generator callback that drains writer_impl->pending_.
             boost::system::error_code ec;
             auto req = self->session_->submit(
-                ec, "POST", std::move(path),
+                ec, "POST", self->RequestUri(path),
                 [writer_impl](uint8_t* buf, std::size_t len,
                               uint32_t* flags) mutable -> ssize_t {
                     return ClientWriterGenerator(writer_impl.get(), buf, len, flags);
@@ -723,7 +724,7 @@ void ChannelImpl::SubmitBidiStreamingCall(
             {
                 Status err;
                 if (!BuildStreamingGrpcHeaders(
-                        self->host_, self->opts_, ctx, hdrs, err)) {
+                        self->opts_, ctx, hdrs, err)) {
                     auto call = std::make_shared<BidiStreamingClientCallState>(
                         self->ioc_, self->strand_, ctx);
                     call->Fail(std::move(err));
@@ -739,7 +740,7 @@ void ChannelImpl::SubmitBidiStreamingCall(
 
             boost::system::error_code ec;
             auto req = self->session_->submit(
-                ec, "POST", std::move(path),
+                ec, "POST", self->RequestUri(path),
                 [writer_impl](uint8_t* buf, std::size_t len,
                               uint32_t* flags) mutable -> ssize_t {
                     return ClientWriterGenerator(writer_impl.get(), buf, len, flags);
@@ -800,11 +801,10 @@ void Channel::Shutdown() {
 }
 
 boost::asio::awaitable<void> Channel::Connect() {
-    auto impl = impl_;
-    co_await boost::asio::async_initiate<
+    return boost::asio::async_initiate<
         const boost::asio::use_awaitable_t<>&,
         void(boost::system::error_code)>(
-        [impl](auto handler) {
+        [impl = impl_](auto handler) {
             impl->Connect([h = std::make_shared<decltype(handler)>(std::move(handler))](
                     boost::system::error_code ec) mutable {
                 std::move(*h)(ec);
@@ -818,14 +818,11 @@ Channel::UnaryCallRaw(std::string_view path,
                       ClientContext&   ctx,
                       std::string_view req_bytes)
 {
-    auto impl   = impl_;
-    std::string path_str{path};
-    std::string req_str{req_bytes};
-
-    co_return co_await boost::asio::async_initiate<
+    return boost::asio::async_initiate<
         const boost::asio::use_awaitable_t<>&,
         void(internal::UnaryResultRaw)>(
-        [impl, path_str, req_str, &ctx](auto handler) mutable {
+        [impl = impl_, path_str = std::string(path),
+         req_str = std::string(req_bytes), &ctx](auto handler) mutable {
             impl->SubmitCall(
                 std::move(path_str),
                 &ctx,
@@ -842,14 +839,11 @@ Channel::ServerStreamingCallRaw(std::string_view path,
                                  ClientContext&   ctx,
                                  std::string_view req_bytes)
 {
-    auto impl     = impl_;
-    std::string path_str{path};
-    std::string req_str{req_bytes};
-
-    co_return co_await boost::asio::async_initiate<
+    return boost::asio::async_initiate<
         const boost::asio::use_awaitable_t<>&,
         void(internal::RawClientReader)>(
-        [impl, path_str, req_str, &ctx](auto handler) mutable {
+        [impl = impl_, path_str = std::string(path),
+         req_str = std::string(req_bytes), &ctx](auto handler) mutable {
             impl->SubmitServerStreamingCall(
                 std::move(path_str),
                 &ctx,
@@ -865,13 +859,10 @@ boost::asio::awaitable<internal::RawClientWriter>
 Channel::ClientStreamingCallRaw(std::string_view path,
                                  ClientContext&   ctx)
 {
-    auto impl     = impl_;
-    std::string path_str{path};
-
-    co_return co_await boost::asio::async_initiate<
+    return boost::asio::async_initiate<
         const boost::asio::use_awaitable_t<>&,
         void(internal::RawClientWriter)>(
-        [impl, path_str, &ctx](auto handler) mutable {
+        [impl = impl_, path_str = std::string(path), &ctx](auto handler) mutable {
             impl->SubmitClientStreamingCall(
                 std::move(path_str),
                 &ctx,
@@ -886,13 +877,10 @@ boost::asio::awaitable<Channel::RawBidiHandles>
 Channel::BidiStreamingCallRaw(std::string_view path,
                                ClientContext&   ctx)
 {
-    auto impl     = impl_;
-    std::string path_str{path};
-
-    co_return co_await boost::asio::async_initiate<
+    return boost::asio::async_initiate<
         const boost::asio::use_awaitable_t<>&,
         void(Channel::RawBidiHandles)>(
-        [impl, path_str, &ctx](auto handler) mutable {
+        [impl = impl_, path_str = std::string(path), &ctx](auto handler) mutable {
             impl->SubmitBidiStreamingCall(
                 std::move(path_str),
                 &ctx,

@@ -62,10 +62,7 @@ void ServerCallState::Start() {
     }
 
     // Populate authority from the :authority pseudo-header (untrusted routing info).
-    {
-        auto it = req_.header().find(":authority");
-        ctx_.set_authority(it != req_.header().end() ? it->second.value : std::string{});
-    }
+    ctx_.set_authority(req_.uri().host);
     if (!peer_identity_.empty())
         ctx_.set_peer_identity(peer_identity_);
 
