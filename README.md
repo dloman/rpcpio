@@ -16,7 +16,7 @@ runtimes, two sets of threads, and a complex shutdown dance between them.
 Boost.Asio coroutines. The result is a library that:
 
 - speaks standard gRPC wire format — interoperates with any conformant peer
-- runs on the caller's `io_context` — no hidden threads, no second event loop
+- runs on the caller's `io_context` by default; private workers are opt-in
 - is expressed entirely in C++20 coroutines — no callbacks, no futures
 - has zero dependency on gRPC Core
 
@@ -45,13 +45,13 @@ Boost.Asio coroutines. The result is a library that:
 
 | Library | Version | Role |
 |---------|---------|------|
-| [nghttp2-asio](https://github.com/cesnet/nghttp2) (CESNET fork) | `0.0.90-20260225-464f056` | HTTP/2 framing + TLS |
+| [nghttp2-asio](https://github.com/dloman/nghttp2-asio) | `0.0.91` plus the `rpcpio-runtime` fixes | HTTP/2 framing + TLS |
 | Boost.Asio | ≥ 1.87 | async executor, coroutines, TLS |
 | Protocol Buffers | 27.x | message serialisation |
 | zlib | 1.3.x | gzip compression (optional) |
 
-> **Extension notes** — rpcpio requires additions to the upstream nghttp2-asio
-> library that are not yet merged upstream. The CESNET BCR module includes them:
+> **Extension notes** — rpcpio requires additions to nghttp2-asio that are not
+> yet released upstream. `MODULE.bazel` pins the reviewed fork commit:
 >
 > *Phase 1* (unary + trailers): `response::on_trailers`, `response::write_trailer`,
 > `session::on_goaway` — spec: [`docs/nghttp2_asio_phase1.md`](docs/nghttp2_asio_phase1.md).
@@ -60,8 +60,9 @@ Boost.Asio coroutines. The result is a library that:
 > provider) and `request::resume()` (wakes a deferred client-side data provider)
 > — spec: [`docs/nghttp2_asio_phase2.md`](docs/nghttp2_asio_phase2.md).
 >
-> Until the BCR module is updated, the library will not link against a stock
-> nghttp2-asio build.
+> The fork also accepts an Asio executor, exposes request connection state, and
+> supports listener-only shutdown. It inherits the root Bazel build's C++
+> language mode instead of forcing its own `-std` flag.
 
 ---
 
@@ -74,6 +75,7 @@ bazel build //:rpcpio             # runtime library + headers
 bazel build //:rpcpio_cpp_plugin  # protoc plugin binary
 bazel test //tests/unit/...       # unit tests
 bazel test //tests/fuzz/...       # fuzz targets
+(cd tests/boost_1_87 && bazelisk test //:boost_floor_test)
 ```
 
 `.bazelrc` enables C++20 and provides `--config=asan`, `--config=ubsan`,
@@ -336,6 +338,31 @@ opts.ca_cert_file     = "ca.pem";   // for mTLS client verification (optional)
 ```
 
 ALPN `h2` is negotiated automatically.
+
+`ValidateChannelOptions(opts)` checks CA, certificate, and key files without
+connecting. A configuration error is sticky: `Connect()` and every later call
+return the same `INVALID_ARGUMENT`. Client certificate and key files must
+always be configured together.
+
+For verified mTLS connections, `ServerContext::peer_identity()` is the first
+URI SAN, or the first DNS SAN when no URI SAN exists. Subjects and the
+client-controlled `:authority` value are never used as identity.
+
+## Executors, shutdown, and limits
+
+`Channel` accepts either an `io_context&` or an executor backed by an
+`io_context`. Its HTTP/2 session and call state are confined to an internal
+strand, while raw unary completion resumes on the caller's associated
+executor.
+
+Servers use the caller's `io_context` by default (`num_threads = 0`) and never
+stop it. A nonzero `num_threads` creates a private context and workers.
+`Shutdown()` is idempotent, can run inside a handler, stops accepting, and
+cancels active calls; `Wait()` joins private workers.
+
+Message-size limits count uncompressed protobuf bytes per message. The server
+does not impose a separate compressed-size limit. Empty protobuf messages are
+valid five-byte gRPC frames and are distinct from a missing message.
 
 ---
 

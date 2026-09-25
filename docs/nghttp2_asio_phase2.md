@@ -1,5 +1,8 @@
 # Phase 2: nghttp2-asio Deferred Data-Provider Extensions
 
+> Historical design specification. These extensions are implemented in the
+> pinned `nghttp2-asio` 0.0.91 fork.
+
 This document specifies the additional public API additions to the CESNET/nghttp2-asio
 library required to support client-streaming and bidirectional-streaming RPCs in
 `rpcpio`.  These are additive extensions on top of the Phase 1 changes described

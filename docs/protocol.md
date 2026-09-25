@@ -5,10 +5,10 @@ internal primitives and how each wire element is translated to/from the public A
 
 ## Scope
 
-`rpcpio` implements **standard unary gRPC over HTTP/2** as specified in
+`rpcpio` implements standard unary, server-streaming, client-streaming, and
+bidirectional gRPC over HTTP/2 as specified in
 [gRPC over HTTP2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md).
-Streaming RPCs, grpc-web, HTTP/3, xDS, and client-side load balancing are
-**explicitly deferred** and not part of this implementation.
+grpc-web, HTTP/3, xDS, and client-side load balancing are explicitly deferred.
 
 ---
 
@@ -167,7 +167,6 @@ Decompression is bounded by `max_receive_message_size` to prevent bombs.
 
 ## Unsupported Features (Version 1)
 
-- **Streaming RPCs** — client/server/bidirectional streaming
 - **grpc-web** — browser HTTP/1.1 bridging
 - **HTTP/3 / QUIC**
 - **Service config** — retries, hedging, load balancing policy

@@ -1,5 +1,8 @@
 # Phase 1: nghttp2-asio Trailer and GOAWAY Extensions
 
+> Historical design specification. These extensions are implemented in the
+> pinned `nghttp2-asio` 0.0.91 fork.
+
 This document specifies the public API additions to the CESNET/nghttp2-asio
 library that are required before `rpcpio` can function as a gRPC transport.
 These changes are published as a successor BCR module version

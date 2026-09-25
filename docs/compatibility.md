@@ -20,8 +20,8 @@ All versions are resolved by the GM Bazel Central Registry (BCR).
 
 | Dependency                | Version pinned in BCR |
 |---------------------------|-----------------------|
-| nghttp2-asio (CESNET fork)| `0.0.90-20260225-464f056` (next target: 0.0.91) |
-| Boost (Asio, Thread, DateTime) | 1.90 (minimum: 1.87) |
+| nghttp2-asio             | `0.0.91` plus pinned `rpcpio-runtime` fixes |
+| Boost.Asio               | 1.90 selected normally; 1.87 minimum |
 | libnghttp2                | 1.65.0                |
 | OpenSSL                   | 3.5.5                 |
 | protobuf                  | 27.3                  |
@@ -32,16 +32,18 @@ All versions are resolved by the GM Bazel Central Registry (BCR).
 
 ---
 
-## BCR Module Provenance
+## nghttp2-asio provenance
 
 ```
-bazel_dep(name = "nghttp2-asio", version = "0.0.90-20260225-464f056")
+bazel_dep(name = "nghttp2-asio", version = "0.0.91")
+git_override(
+    module_name = "nghttp2-asio",
+    commit = "a113ed3e48611f22615e9d9910d71348dbdfa9af",
+    remote = "https://github.com/dloman/nghttp2-asio.git",
+)
 ```
 
-This module is published via GM-ADAS/DEVOPS.bazel-central-registry PR #357.
-It wraps the CESNET/nghttp2-asio snapshot at commit
-`464f05639223bce01556fd7d81547087d518e909` with the following additions
-(Phase 1 of this library's development):
+The override supplies the following additions needed by rpcpio:
 
 1. `response::on_trailers(trailer_cb cb)` — callback invoked with the complete
    trailing HEADERS block after DATA EOF.
@@ -53,9 +55,9 @@ It wraps the CESNET/nghttp2-asio snapshot at commit
    GOAWAY handling.
 5. Separate size limit for trailers (configurable, default 8 KiB).
 
-These changes are published as a successor version in the GM BCR.  The released
-`rpcpio` library depends only on the numbered registry version; it never
-references a Git branch or ad-hoc archive.
+It also provides executor-based client sessions, per-request connection
+certificate and executor access, deferred-stream resume, listener-only server
+shutdown, and safe shutdown before client connection setup.
 
 ---
 
@@ -63,9 +65,8 @@ references a Git branch or ad-hoc archive.
 
 | Bazel version | Status                |
 |---------------|-----------------------|
-| 7.x           | Supported (tested)    |
-| 8.x           | Supported (tested)    |
-| 6.x and below | Not supported         |
+| 8.7+          | Supported             |
+| 8.6 and below | Not supported         |
 
 Bzlmod (`--enable_bzlmod`) is required.  Legacy WORKSPACE mode is not supported.
 
@@ -145,7 +146,6 @@ Reference implementations tested: gRPC C++ (v1.65), Go (`google.golang.org/grpc`
 
 ## Unsupported Features (Deferred to Future Versions)
 
-- Streaming RPCs (client, server, bidirectional)
 - grpc-web
 - HTTP/3 / QUIC transport
 - Service config (retry policy, hedging)
