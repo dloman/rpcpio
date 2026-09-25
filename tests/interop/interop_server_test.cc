@@ -153,7 +153,7 @@ TEST_F(InteropServerTest, EmptyCallFromClient) {
             result_status = result.status;
             done = true;
         },
-        boost::asio::detached);
+        [channel](std::exception_ptr) { channel->Shutdown(); });
 
     client_ioc.run();
 
@@ -184,7 +184,7 @@ TEST_F(InteropServerTest, UnaryCallEchoStatus) {
             auto result = co_await stub.UnaryCall(ctx, req);
             result_status = result.status;
         },
-        boost::asio::detached);
+        [channel](std::exception_ptr) { channel->Shutdown(); });
 
     client_ioc.run();
 
@@ -221,7 +221,7 @@ TEST_F(InteropServerTest, ServerStreamingCall) {
             }
             final_status = co_await reader.Finish();
         },
-        boost::asio::detached);
+        [channel](std::exception_ptr) { channel->Shutdown(); });
 
     client_ioc.run();
 
@@ -255,7 +255,7 @@ TEST_F(InteropServerTest, ClientStreamingCall) {
             co_await writer.WritesDone();
             result = co_await writer.FinishAndGetResponse();
         },
-        boost::asio::detached);
+        [channel](std::exception_ptr) { channel->Shutdown(); });
 
     client_ioc.run();
 
@@ -295,7 +295,7 @@ TEST_F(InteropServerTest, BidiStreamingCall) {
             co_await stream.WritesDone();
             final_status = co_await stream.Finish();
         },
-        boost::asio::detached);
+        [channel](std::exception_ptr) { channel->Shutdown(); });
 
     client_ioc.run();
 

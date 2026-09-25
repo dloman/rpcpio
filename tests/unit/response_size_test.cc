@@ -54,6 +54,7 @@ static rpcpio::Status RunOnce(std::size_t limit, std::size_t resp_size) {
             rpcpio::ClientContext ctx;
             auto raw = co_await ch->UnaryCallRaw(kSizePath, ctx, "");
             result = raw.status;
+            ch->Shutdown();
         },
         boost::asio::detached);
 
@@ -128,10 +129,13 @@ static rpcpio::Status RunStreamingOnce(std::size_t limit,
             auto reader = co_await ch->ServerStreamingCallRaw(kStreamSizePath, ctx, "");
             while (true) {
                 auto r = co_await reader.Read();
-                if (!r.status.ok()) { final_status = r.status; co_return; }
-                if (!r.data.has_value()) break;
+                if (!r.status.ok()) { final_status = r.status; break; }
+                if (!r.data.has_value()) {
+                    final_status = co_await reader.Finish();
+                    break;
+                }
             }
-            final_status = co_await reader.Finish();
+            ch->Shutdown();
         },
         boost::asio::detached);
 

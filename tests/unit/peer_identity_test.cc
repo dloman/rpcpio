@@ -55,7 +55,7 @@ TEST(PeerIdentity, H2cYieldsNulloptIdentityAndNonEmptyAuthority) {
             rpcpio::ClientContext ctx;
             co_await ch->UnaryCallRaw(kEchoAuthPath, ctx, "");
         },
-        boost::asio::detached);
+        [ch](std::exception_ptr) { ch->Shutdown(); });
 
     client_ioc.run();
     server.Shutdown();
@@ -132,7 +132,7 @@ TEST(PeerIdentity, MtlsPopulatesPeerIdentity) {
             rpcpio::ClientContext ctx;
             co_await ch->UnaryCallRaw(kEchoAuthPath, ctx, "");
         },
-        boost::asio::detached);
+        [ch](std::exception_ptr) { ch->Shutdown(); });
 
     client_ioc.run();
     server.Shutdown();

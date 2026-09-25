@@ -61,7 +61,7 @@ TEST(Strand, ConcurrentCallsAllComplete) {
                 std::string payload(8, static_cast<char>('a' + (i % 26)));
                 auto raw = co_await ch->UnaryCallRaw(kStrandPath, ctx, payload);
                 if (raw.status.ok()) ++ok_count;
-                ++done_count;
+                if (++done_count == kCalls) ch->Shutdown();
             },
             boost::asio::detached);
     }

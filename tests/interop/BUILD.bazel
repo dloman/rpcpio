@@ -56,7 +56,10 @@ cc_test(
         "@googletest//:gtest_main",
     ],
     # Set TEST_SERVER_HOST and TEST_SERVER_PORT env vars to point at a server.
-    tags = ["requires-network"],
+    tags = [
+        "manual",
+        "requires-network",
+    ],
 )
 
 cc_test(
