@@ -172,13 +172,23 @@ void ChannelImpl::DoShutdown() {
     if (state_ == ConnState::kShutdown) return;
     state_ = ConnState::kShutdown;
 
+    const auto clear_session_callbacks = [](
+            const std::shared_ptr<
+                nghttp2::asio_http2::client::session>& session) {
+        session->on_connect({});
+        session->on_error({});
+        session->on_goaway({});
+    };
+
     // Close any session being established.
     if (connecting_session_) {
+        clear_session_callbacks(connecting_session_);
         connecting_session_->shutdown();
         connecting_session_.reset();
     }
     // Close any established session.
     if (session_) {
+        clear_session_callbacks(session_);
         session_->shutdown();
         session_.reset();
     }

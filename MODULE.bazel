@@ -15,7 +15,7 @@ bazel_dep(name = "boost.asio", version = "1.87.0")
 # rpcpio is the root module; consumers must supply their own.
 git_override(
     module_name = "nghttp2-asio",
-    commit = "568af6f9f36539c19ec6477d7475cd2bda1df131",
+    commit = "a113ed3e48611f22615e9d9910d71348dbdfa9af",
     remote = "https://github.com/dloman/nghttp2-asio.git",
 )
 
