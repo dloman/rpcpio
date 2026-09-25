@@ -142,6 +142,12 @@ void ClientStreamingClientCallState::Attach(
                         }
                         self->payload_buf_.clear();
                         self->payload_buf_.reserve(self->payload_len_);
+                        if (self->payload_len_ == 0) {
+                            self->writer_impl_->response_bytes_.clear();
+                            self->writer_impl_->has_response_ = true;
+                            self->hdr_done_  = false;
+                            self->hdr_bytes_ = 0;
+                        }
                     }
                 } else {
                     const std::size_t need = self->payload_len_ - self->payload_buf_.size();
@@ -150,6 +156,7 @@ void ClientStreamingClientCallState::Attach(
                     pos += take;
                     if (self->payload_buf_.size() == self->payload_len_) {
                         self->writer_impl_->response_bytes_ = self->payload_buf_;
+                        self->writer_impl_->has_response_ = true;
                         self->hdr_done_    = false;
                         self->hdr_bytes_   = 0;
                         self->payload_len_ = 0;
@@ -208,6 +215,10 @@ RawClientWriter::Finish() {
 // response_bytes accessor (used by Channel::ClientStreamingCall template).
 const std::string& RawClientWriter::response_bytes() const noexcept {
     return impl_->response_bytes_;
+}
+
+bool RawClientWriter::has_response() const noexcept {
+    return impl_->has_response_;
 }
 
 } // namespace rpcpio::internal

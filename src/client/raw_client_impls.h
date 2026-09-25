@@ -53,6 +53,7 @@ struct RawClientWriterImpl {
 
     // Single response message from the server (client-streaming RPC).
     std::string response_bytes_;
+    bool        has_response_ = false;
 
     // Final grpc-status from server trailing headers.
     Status                    final_status_;

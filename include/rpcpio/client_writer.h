@@ -43,7 +43,7 @@ public:
         result.status = s;
         if (s.ok()) {
             const std::string& rb = raw_.response_bytes();
-            if (rb.empty()) {
+            if (!raw_.has_response()) {
                 result.status = Status{StatusCode::INTERNAL,
                                        "client-streaming: missing server response"};
             } else {

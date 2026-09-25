@@ -11,9 +11,11 @@ namespace rpcpio::internal {
 // (a header-only template) can deserialize it into the concrete Response type.
 struct UnaryResultRaw {
     Status      status;
-    std::string response_bytes;    // non-empty only when status.ok()
+    std::string response_bytes;
     MetadataMap initial_metadata;
     MetadataMap trailing_metadata;
+    // Distinguishes a received zero-length message from no message at all.
+    bool        has_response = false;
 };
 
 } // namespace rpcpio::internal

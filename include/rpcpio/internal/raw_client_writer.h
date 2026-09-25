@@ -27,6 +27,7 @@ public:
     // Valid only after Finish() returns with a status of OK.
     // Used by the typed ClientStreamingCall template to deserialize the response.
     const std::string& response_bytes() const noexcept;
+    bool has_response() const noexcept;
 
 private:
     std::shared_ptr<RawClientWriterImpl> impl_;

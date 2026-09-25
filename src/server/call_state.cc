@@ -205,7 +205,7 @@ void ServerCallState::SendResponse(const Status&      status,
     if (responded_) return;
     responded_ = true;
 
-    if (!status.ok() || resp_bytes.empty()) {
+    if (!status.ok()) {
         // Trailers-only path: no DATA to send.
         nghttp2::asio_http2::header_map hdrs;
         AddCommonHeaders(hdrs);

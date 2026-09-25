@@ -83,14 +83,14 @@ public:
         result.initial_metadata  = std::move(raw.initial_metadata);
         result.trailing_metadata = std::move(raw.trailing_metadata);
 
-        if (raw.status.ok() && !raw.response_bytes.empty()) {
+        if (raw.status.ok() && raw.has_response) {
             result.response.emplace();
             if (!result.response->ParseFromString(raw.response_bytes)) {
                 result.status = Status{StatusCode::INTERNAL,
                                        "response deserialization failed"};
                 result.response.reset();
             }
-        } else if (raw.status.ok() && raw.response_bytes.empty()) {
+        } else if (raw.status.ok()) {
             // gRPC requires exactly one response message for OK unary calls.
             result.status = Status{StatusCode::INTERNAL, "missing response message"};
         }

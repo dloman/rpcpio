@@ -182,6 +182,7 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
                 self->result_.response_bytes = std::string(raw_payload);
             }
 
+            self->result_.has_response = self->decoder_.done();
             self->Complete(std::move(self->result_));
         });
     });

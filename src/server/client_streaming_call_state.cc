@@ -178,7 +178,7 @@ void ClientStreamingCallState::SendResponse(
 
     responded_ = true;
 
-    if (!status.ok() || resp_bytes.empty()) {
+    if (!status.ok()) {
         // Trailers-only path.
         nghttp2::asio_http2::header_map hdrs;
         AddCommonHeadersCS(hdrs);
