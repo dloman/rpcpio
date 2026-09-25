@@ -19,7 +19,7 @@ RunDeadlineDemo(boost::asio::io_context& ioc,
     opts.verify_peer = false;
 
     auto channel = std::make_shared<rpcpio::Channel>(ioc, host, port, opts);
-    slowecho::SlowEchoStub stub(channel);
+    slowecho::SlowEchoServiceStub stub(channel);
 
     // ── Call with a tight deadline (will expire before the server replies) ───
     {

@@ -18,7 +18,7 @@ RunMetadataDemo(boost::asio::io_context& ioc,
     opts.verify_peer = false;
 
     auto channel = std::make_shared<rpcpio::Channel>(ioc, host, port, opts);
-    echomd::EchoStub stub(channel);
+    echomd::EchoServiceStub stub(channel);
 
     echomd::EchoRequest req;
     req.set_message("ping");

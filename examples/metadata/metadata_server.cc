@@ -6,7 +6,7 @@
 #include <boost/asio/signal_set.hpp>
 #include "echo.rpcpio.pb.h"
 
-class EchoServiceImpl final : public echomd::EchoService {
+class EchoServiceImpl final : public echomd::EchoServiceService {
 public:
     boost::asio::awaitable<rpcpio::StatusOr<echomd::EchoResponse>>
     Echo(rpcpio::ServerContext&       ctx,

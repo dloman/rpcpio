@@ -18,7 +18,7 @@ RunExamples(boost::asio::io_context& ioc,
     opts.verify_peer = false;
 
     auto channel = std::make_shared<rpcpio::Channel>(ioc, host, port, opts);
-    counter::CounterStub stub(channel);
+    counter::CounterServiceStub stub(channel);
 
     // ── Server-streaming: count down from 5 ──────────────────────────────────
     {

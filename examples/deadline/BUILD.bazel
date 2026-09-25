@@ -38,6 +38,8 @@ cc_library(
     srcs = [":slow_echo_rpcpio_gen"],
     hdrs = ["slow_echo.rpcpio.pb.h"],
     copts = ["-std=c++20"],
+    # Generated code includes its own headers by bare filename.
+    includes = ["."],
     deps = [
         ":slow_echo_cc_proto",
         "//:rpcpio_runtime",

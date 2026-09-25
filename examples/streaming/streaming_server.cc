@@ -6,7 +6,7 @@
 #include <boost/asio/signal_set.hpp>
 #include "counter.rpcpio.pb.h"
 
-class CounterServiceImpl final : public counter::CounterService {
+class CounterServiceImpl final : public counter::CounterServiceService {
 public:
     // ── Server-streaming: emit start, start-1, ..., 1 ────────────────────────
     boost::asio::awaitable<rpcpio::Status>

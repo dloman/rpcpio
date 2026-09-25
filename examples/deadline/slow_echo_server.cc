@@ -6,12 +6,14 @@
 #include <chrono>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include "slow_echo.rpcpio.pb.h"
 
-class SlowEchoServiceImpl final : public slowecho::SlowEchoService {
+class SlowEchoServiceImpl final : public slowecho::SlowEchoServiceService {
 public:
     boost::asio::awaitable<rpcpio::StatusOr<slowecho::EchoResponse>>
     SlowEcho(rpcpio::ServerContext&          ctx,

@@ -41,6 +41,8 @@ cc_library(
     srcs = [":helloworld_rpcpio_gen"],
     hdrs = ["helloworld.rpcpio.pb.h"],
     copts = ["-std=c++20"],
+    # Generated code includes its own headers by bare filename.
+    includes = ["."],
     deps = [
         ":helloworld_cc_proto",
         "//:rpcpio_runtime",

@@ -38,6 +38,8 @@ cc_library(
     srcs = [":counter_rpcpio_gen"],
     hdrs = ["counter.rpcpio.pb.h"],
     copts = ["-std=c++20"],
+    # Generated code includes its own headers by bare filename.
+    includes = ["."],
     deps = [
         ":counter_cc_proto",
         "//:rpcpio_runtime",
