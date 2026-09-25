@@ -1,0 +1,7 @@
+build --enable_bzlmod
+build --cxxopt=-std=c++20
+build --host_cxxopt=-std=c++20
+build --incompatible_enable_cc_toolchain_resolution
+build --symlink_prefix=../../bazel-boost-floor-
+common --@boost.asio//:ssl=boringssl
+test --test_output=errors

@@ -1,0 +1,5 @@
+cc_test(
+    name = "boost_floor_test",
+    srcs = ["boost_floor_test.cc"],
+    deps = ["@rpcpio//:rpcpio_runtime"],
+)
