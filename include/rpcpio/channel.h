@@ -43,6 +43,10 @@ struct ChannelOptions {
     std::size_t max_send_message_size{4 * 1024 * 1024};
 };
 
+// Checks TLS files and client certificate/key consistency without connecting.
+// Configuration failures are returned as INVALID_ARGUMENT and are never thrown.
+Status ValidateChannelOptions(const ChannelOptions& options);
+
 class Channel {
 public:
     // host: hostname or IP; port: 443 default for TLS, 80 for h2c
@@ -52,8 +56,9 @@ public:
             ChannelOptions           opts = {});
     ~Channel();
 
-    // Proactively establish the connection (optional; first UnaryCall connects lazily).
-    boost::asio::awaitable<void> Connect();
+    // Proactively establish the connection (optional; first UnaryCall connects
+    // lazily). TLS configuration errors are returned as INVALID_ARGUMENT.
+    boost::asio::awaitable<Status> Connect();
 
     // Permanently stop the channel. Fails all pending and in-flight calls with
     // CANCELLED. Idempotent. Safe to call from any thread.

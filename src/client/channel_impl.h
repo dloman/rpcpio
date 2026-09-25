@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -43,7 +44,7 @@ public:
     ~ChannelImpl();
 
     // Initiate connection (idempotent; safe to call while already connecting).
-    void Connect(std::function<void(boost::system::error_code)> cb);
+    void Connect(std::function<void(Status)> cb);
 
     // Permanently stop the channel. Idempotent. Safe to call from any thread.
     void Shutdown();
@@ -96,6 +97,7 @@ private:
     void OnConnected(boost::system::error_code ec);
     void DrainQueue(boost::system::error_code ec);
     void FailAll(Status status);
+    Status ShutdownStatus() const;
 
     // Called when peer sends GOAWAY.  Fails unaccepted streams
     // (stream_id > last_stream_id) immediately; accepted streams are left to
@@ -131,7 +133,8 @@ private:
     std::shared_ptr<nghttp2::asio_http2::client::session> connecting_session_;
 
     // Callbacks waiting for connection to be established.
-    std::vector<std::function<void(boost::system::error_code)>> connect_waiters_;
+    std::vector<std::function<void(Status)>> connect_waiters_;
+    std::optional<Status> terminal_status_;
 
     // Tracks submitted but not yet closed streams: stream_id → call state.
     // Used by OnGoaway to fail calls the peer did not process.

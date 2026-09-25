@@ -5,15 +5,143 @@
 #include "bidi_streaming_call_state.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <exception>
 #include <boost/asio/post.hpp>
 #include <nghttp2/asio_http2_client.h>
 #include <nghttp2/nghttp2.h>
+#include <openssl/err.h>
 
 #include "src/protocol/framing.h"
 #include "src/protocol/metadata_codec.h"
 #include "src/protocol/status_map.h"
 #include "src/protocol/timeout.h"
+
+namespace {
+
+rpcpio::Status TlsFileError(
+        std::string_view kind,
+        const std::string& path,
+        const boost::system::error_code& error) {
+    return rpcpio::Status{
+        rpcpio::StatusCode::INVALID_ARGUMENT,
+        std::string(kind) + " '" + path + "': " + error.message()};
+}
+
+rpcpio::Status ConfigureTlsContext(
+        const rpcpio::ChannelOptions& options,
+        boost::asio::ssl::context& context) {
+    if (options.client_cert_file.empty() !=
+        options.client_key_file.empty()) {
+        return rpcpio::Status{
+            rpcpio::StatusCode::INVALID_ARGUMENT,
+            "client certificate and private key files must be set together"};
+    }
+
+    boost::system::error_code error;
+    context.set_options(
+        boost::asio::ssl::context::default_workarounds |
+            boost::asio::ssl::context::no_sslv2 |
+            boost::asio::ssl::context::no_sslv3,
+        error);
+    if (error) {
+        return rpcpio::Status{
+            rpcpio::StatusCode::INVALID_ARGUMENT,
+            "TLS context options: " + error.message()};
+    }
+
+    if (!options.ca_cert_file.empty()) {
+        context.load_verify_file(options.ca_cert_file, error);
+        if (error) {
+            return TlsFileError(
+                "CA certificate file", options.ca_cert_file, error);
+        }
+    } else {
+        context.set_default_verify_paths(error);
+        error.clear();
+    }
+
+    if (!options.client_cert_file.empty()) {
+        context.use_certificate_chain_file(
+            options.client_cert_file, error);
+        if (error) {
+            return TlsFileError(
+                "client certificate file",
+                options.client_cert_file,
+                error);
+        }
+        context.use_private_key_file(
+            options.client_key_file,
+            boost::asio::ssl::context::pem,
+            error);
+        if (error) {
+            return TlsFileError(
+                "client private key file",
+                options.client_key_file,
+                error);
+        }
+        if (SSL_CTX_check_private_key(context.native_handle()) != 1) {
+            std::array<char, 256> message{};
+            ERR_error_string_n(
+                ERR_get_error(), message.data(), message.size());
+            return rpcpio::Status{
+                rpcpio::StatusCode::INVALID_ARGUMENT,
+                "client certificate and private key do not match: " +
+                    std::string(message.data())};
+        }
+    }
+
+    context.set_verify_mode(
+        options.verify_peer
+            ? boost::asio::ssl::verify_peer
+            : boost::asio::ssl::verify_none,
+        error);
+    if (error) {
+        return rpcpio::Status{
+            rpcpio::StatusCode::INVALID_ARGUMENT,
+            "TLS verification mode: " + error.message()};
+    }
+
+    static const unsigned char kH2Alpn[] = "\x02h2";
+    if (SSL_CTX_set_alpn_protos(
+            context.native_handle(),
+            kH2Alpn,
+            sizeof(kH2Alpn) - 1) != 0) {
+        return rpcpio::Status{
+            rpcpio::StatusCode::INVALID_ARGUMENT,
+            "failed to configure TLS ALPN"};
+    }
+    return {};
+}
+
+rpcpio::Status BuildTlsContext(
+        const rpcpio::ChannelOptions& options,
+        std::shared_ptr<boost::asio::ssl::context>& context) noexcept {
+    try {
+        context = std::make_shared<boost::asio::ssl::context>(
+            boost::asio::ssl::context::tls_client);
+        return ConfigureTlsContext(options, *context);
+    } catch (const std::exception& error) {
+        return rpcpio::Status{
+            rpcpio::StatusCode::INVALID_ARGUMENT,
+            "TLS configuration: " + std::string(error.what())};
+    }
+}
+
+} // namespace
+
+namespace rpcpio {
+
+Status ValidateChannelOptions(const ChannelOptions& options) {
+    if (!options.use_tls || options.use_h2c) {
+        return {};
+    }
+    std::shared_ptr<boost::asio::ssl::context> context;
+    return BuildTlsContext(options, context);
+}
+
+} // namespace rpcpio
 
 namespace rpcpio::internal {
 
@@ -30,18 +158,20 @@ ChannelImpl::ChannelImpl(boost::asio::io_context& ioc,
 
 ChannelImpl::~ChannelImpl() = default;
 
-void ChannelImpl::Connect(std::function<void(boost::system::error_code)> cb) {
+void ChannelImpl::Connect(std::function<void(Status)> cb) {
     boost::asio::dispatch(strand_,
         [self = shared_from_this(), cb = std::move(cb)]() mutable {
             if (self->state_ == ConnState::kShutdown) {
-                cb(boost::asio::error::operation_aborted);
+                cb(self->ShutdownStatus());
                 return;
             }
-            if (self->state_ == ConnState::kReady) { cb({}); return; }
+            if (self->state_ == ConnState::kReady) {
+                cb({});
+                return;
+            }
             if (self->state_ == ConnState::kFailed) {
-                cb(boost::system::error_code{
-                    boost::asio::error::connection_refused,
-                    boost::asio::error::get_system_category()});
+                cb(Status{
+                    StatusCode::UNAVAILABLE, "channel failed"});
                 return;
             }
             self->connect_waiters_.push_back(std::move(cb));
@@ -56,46 +186,15 @@ void ChannelImpl::DoConnect() {
     auto self = shared_from_this();
 
     if (opts_.use_tls && !opts_.use_h2c) {
-        // Share the SSL context so it outlives the session.
-        auto ssl_ctx = std::make_shared<boost::asio::ssl::context>(
-            boost::asio::ssl::context::tls_client);
-        ssl_ctx->set_options(boost::asio::ssl::context::default_workarounds |
-                             boost::asio::ssl::context::no_sslv2 |
-                             boost::asio::ssl::context::no_sslv3);
-
-        // Use EC-based overloads; translate failures to a connection error.
-        boost::system::error_code tls_ec;
-
-        if (!opts_.ca_cert_file.empty()) {
-            ssl_ctx->load_verify_file(opts_.ca_cert_file, tls_ec);
-        } else {
-            ssl_ctx->set_default_verify_paths(tls_ec);
-            tls_ec = {};  // non-fatal; system store may be empty
-        }
-        if (!tls_ec && !opts_.client_cert_file.empty()) {
-            ssl_ctx->use_certificate_chain_file(opts_.client_cert_file, tls_ec);
-        }
-        if (!tls_ec && !opts_.client_key_file.empty() &&
-            !opts_.client_cert_file.empty()) {
-            ssl_ctx->use_private_key_file(opts_.client_key_file,
-                                           boost::asio::ssl::context::pem, tls_ec);
-        }
-        if (tls_ec) {
-            // TLS configuration errors are permanent — wrong file path never self-heals.
+        std::shared_ptr<boost::asio::ssl::context> ssl_ctx;
+        Status configuration_status =
+            BuildTlsContext(opts_, ssl_ctx);
+        if (!configuration_status.ok()) {
             state_ = ConnState::kShutdown;
-            DrainWithStatus(Status{StatusCode::INVALID_ARGUMENT,
-                                   "TLS configuration: " + tls_ec.message()});
+            terminal_status_ = configuration_status;
+            DrainWithStatus(std::move(configuration_status));
             return;
         }
-
-        ssl_ctx->set_verify_mode(opts_.verify_peer
-            ? boost::asio::ssl::verify_peer
-            : boost::asio::ssl::verify_none);
-
-        // Advertise h2 via ALPN.
-        static const unsigned char kH2Alpn[] = "\x02h2";
-        SSL_CTX_set_alpn_protos(ssl_ctx->native_handle(), kH2Alpn,
-                                sizeof(kH2Alpn) - 1);
 
         // Create session and store in connecting_session_ before callbacks.
         auto sess = std::make_shared<nghttp2::asio_http2::client::session>(
@@ -193,13 +292,14 @@ void ChannelImpl::DoShutdown() {
         session_.reset();
     }
 
+    Status cancelled{StatusCode::CANCELLED, "channel shut down"};
+
     // Drain connect waiters.
     auto waiters = std::move(connect_waiters_);
     for (auto& w : waiters)
-        w(boost::asio::error::operation_aborted);
+        w(cancelled);
 
     // Fail active unary calls.
-    Status cancelled{StatusCode::CANCELLED, "channel shut down"};
     for (auto& [id, call] : active_calls_)
         call->Fail(cancelled);
     active_calls_.clear();
@@ -276,11 +376,18 @@ void ChannelImpl::OnConnected(boost::system::error_code ec) {
 
 void ChannelImpl::DrainQueue(boost::system::error_code ec) {
     auto waiters = std::move(connect_waiters_);
-    for (auto& w : waiters) w(ec);
+    Status connection_status;
+    if (ec) {
+        connection_status = Status{
+            protocol::AsioErrorToStatusCode(ec.value(), true),
+            "connection failed: " + ec.message()};
+    }
+    for (auto& w : waiters) {
+        w(connection_status);
+    }
 
     if (ec) {
-        FailAll(Status{protocol::AsioErrorToStatusCode(ec.value(), true),
-                       "connection failed: " + ec.message()});
+        FailAll(connection_status);
         return;
     }
     auto pending = std::move(pending_calls_);
@@ -304,8 +411,13 @@ void ChannelImpl::FailAll(Status status) {
 void ChannelImpl::DrainWithStatus(Status st) {
     auto waiters = std::move(connect_waiters_);
     for (auto& w : waiters)
-        w(boost::asio::error::operation_aborted);
+        w(st);
     FailAll(st);
+}
+
+Status ChannelImpl::ShutdownStatus() const {
+    return terminal_status_.value_or(
+        Status{StatusCode::CANCELLED, "channel shut down"});
 }
 
 void ChannelImpl::SubmitCall(std::string                         path,
@@ -319,8 +431,7 @@ void ChannelImpl::SubmitCall(std::string                         path,
          req_bytes  = std::move(req_bytes),
          completion = std::move(completion)]() mutable {
             if (self->state_ == ConnState::kShutdown) {
-                completion(UnaryResultRaw{
-                    Status{StatusCode::CANCELLED, "channel shut down"}});
+                completion(UnaryResultRaw{self->ShutdownStatus()});
                 return;
             }
             if (self->state_ == ConnState::kIdle ||
@@ -473,7 +584,7 @@ void ChannelImpl::SubmitServerStreamingCall(
             if (self->state_ == ConnState::kShutdown) {
                 auto call = std::make_shared<ServerStreamingClientCallState>(
                     self->ioc_, self->strand_, ctx);
-                call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
+                call->Fail(self->ShutdownStatus());
                 completion(call->TakeReader());
                 return;
             }
@@ -603,7 +714,7 @@ void ChannelImpl::SubmitClientStreamingCall(
             if (self->state_ == ConnState::kShutdown) {
                 auto call = std::make_shared<ClientStreamingClientCallState>(
                     self->ioc_, self->strand_, ctx);
-                call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
+                call->Fail(self->ShutdownStatus());
                 completion(call->TakeWriter());
                 return;
             }
@@ -704,7 +815,7 @@ void ChannelImpl::SubmitBidiStreamingCall(
             if (self->state_ == ConnState::kShutdown) {
                 auto call = std::make_shared<BidiStreamingClientCallState>(
                     self->ioc_, self->strand_, ctx);
-                call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
+                call->Fail(self->ShutdownStatus());
                 completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
                 return;
             }
@@ -817,14 +928,14 @@ void Channel::Shutdown() {
     impl_->Shutdown();
 }
 
-boost::asio::awaitable<void> Channel::Connect() {
+boost::asio::awaitable<Status> Channel::Connect() {
     return boost::asio::async_initiate<
         const boost::asio::use_awaitable_t<>&,
-        void(boost::system::error_code)>(
+        void(Status)>(
         [impl = impl_](auto handler) {
             impl->Connect([h = std::make_shared<decltype(handler)>(std::move(handler))](
-                    boost::system::error_code ec) mutable {
-                std::move(*h)(ec);
+                    Status status) mutable {
+                std::move(*h)(std::move(status));
             });
         },
         boost::asio::use_awaitable);
