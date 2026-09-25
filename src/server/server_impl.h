@@ -70,6 +70,7 @@ private:
 
     std::vector<std::thread>  threads_;
     std::atomic<bool>         shutdown_{false};
+    std::atomic<bool>         started_{false};
     std::uint16_t             bound_port_{0};
 };
 

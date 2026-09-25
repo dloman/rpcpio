@@ -31,7 +31,8 @@ public:
                     RawHandler                            handler,
                     std::size_t                           max_request_size,
                     std::size_t                           max_metadata_size,
-                    std::size_t                           max_response_size);
+                    std::size_t                           max_response_size,
+                    std::string                           peer_identity);
 
     // Begin receiving request data and, once complete, dispatch the handler.
     void Start();
@@ -54,6 +55,7 @@ private:
     std::size_t                                    max_request_size_;
     std::size_t                                    max_metadata_size_;
     std::size_t                                    max_response_size_;
+    std::string                                    peer_identity_;
 
     protocol::FrameDecoder           decoder_;
     std::optional<protocol::Encoding> request_encoding_;  // from grpc-encoding header

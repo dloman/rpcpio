@@ -130,7 +130,8 @@ public:
         RawClientStreamingHandler                       handler,
         std::size_t                                     max_message_size,
         std::size_t                                     max_metadata_size,
-        std::size_t                                     max_response_size);
+        std::size_t                                     max_response_size,
+        std::string                                     peer_identity);
 
     // Register on_data callback and start the handler coroutine.
     void Start();
@@ -150,6 +151,7 @@ private:
     std::size_t                                    max_message_size_;
     std::size_t                                    max_metadata_size_;
     std::size_t                                    max_response_size_;
+    std::string                                    peer_identity_;
 
     StreamingFrameParser      parser_;   // multi-message LPM frame parser
     ServerContext             ctx_;

@@ -17,6 +17,8 @@ Status RawServerWriterImpl::Write(std::string_view proto_bytes) {
     }
     // Check uncompressed message size before framing.
     if (proto_bytes.size() > max_response_size_) {
+        Finish(Status{StatusCode::RESOURCE_EXHAUSTED,
+                      "response message exceeds max_response_message_size"});
         return Status{StatusCode::RESOURCE_EXHAUSTED,
                       "response message exceeds max_response_message_size"};
     }

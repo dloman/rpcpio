@@ -40,3 +40,19 @@ TEST(StartupError, MissingCertFileReturnsInvalidArgNoThrow) {
     EXPECT_FALSE(s.ok());
     EXPECT_EQ(s.code(), rpcpio::StatusCode::INVALID_ARGUMENT) << s.message();
 }
+
+TEST(StartupError, DoubleStartReturnsPreconditionFailed) {
+    boost::asio::io_context ioc;
+    rpcpio::ServerOptions opts;
+    opts.use_h2c     = true;
+    opts.num_threads = 0;  // no threads needed for this test
+    rpcpio::Server server(ioc, opts);
+
+    EXPECT_TRUE(server.Start("127.0.0.1", 0).ok());
+
+    rpcpio::Status s = server.Start("127.0.0.1", 0);
+    EXPECT_FALSE(s.ok());
+    EXPECT_EQ(s.code(), rpcpio::StatusCode::FAILED_PRECONDITION) << s.message();
+
+    server.Shutdown();
+}

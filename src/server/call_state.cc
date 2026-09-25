@@ -21,7 +21,8 @@ ServerCallState::ServerCallState(
     RawHandler                                       handler,
     std::size_t                                      max_request_size,
     std::size_t                                      max_metadata_size,
-    std::size_t                                      max_response_size)
+    std::size_t                                      max_response_size,
+    std::string                                      peer_identity)
     : ioc_(ioc)
     , req_(req)
     , resp_(resp)
@@ -29,6 +30,7 @@ ServerCallState::ServerCallState(
     , max_request_size_(max_request_size)
     , max_metadata_size_(max_metadata_size)
     , max_response_size_(max_response_size)
+    , peer_identity_(std::move(peer_identity))
     , decoder_(max_request_size)
     , timer_(ioc)
 {}
@@ -64,7 +66,8 @@ void ServerCallState::Start() {
         auto it = req_.header().find(":authority");
         ctx_.set_authority(it != req_.header().end() ? it->second.value : std::string{});
     }
-    // peer_identity_ stays nullopt for h2c; mTLS identity set by server_impl after cert verification.
+    if (!peer_identity_.empty())
+        ctx_.set_peer_identity(peer_identity_);
 
     // Parse grpc-timeout and arm the deadline timer.
     auto tmo_it = req_.header().find("grpc-timeout");

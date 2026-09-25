@@ -90,6 +90,8 @@ public:
 private:
     // Internal implementations (must be called only from strand_).
     void DoConnect();
+    void DoShutdown();
+    void DrainWithStatus(Status st);
     void OnConnected(boost::system::error_code ec);
     void DrainQueue(boost::system::error_code ec);
     void FailAll(Status status);

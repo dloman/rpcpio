@@ -58,3 +58,39 @@ TEST(Shutdown, IsIdempotent) {
 
     ioc.run();
 }
+
+TEST(Shutdown, DuringConnect) {
+    // Queue a call (triggers connect), shut down before io_context runs.
+    boost::asio::io_context ioc;
+    rpcpio::ChannelOptions copts;
+    copts.use_h2c = true;
+    auto ch = std::make_shared<rpcpio::Channel>(ioc, "127.0.0.1", 19999, copts);
+
+    rpcpio::Status result{rpcpio::StatusCode::INTERNAL, "not set"};
+    bool done = false;
+    boost::asio::co_spawn(ioc,
+        [ch, &result, &done]() -> boost::asio::awaitable<void> {
+            rpcpio::ClientContext ctx;
+            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, "");
+            result = raw.status;
+            done = true;
+        },
+        boost::asio::detached);
+
+    ch->Shutdown();
+    ioc.run();
+
+    ASSERT_TRUE(done);
+    EXPECT_EQ(result.code(), rpcpio::StatusCode::CANCELLED) << result.message();
+}
+
+TEST(Shutdown, AfterIocStop) {
+    boost::asio::io_context ioc;
+    rpcpio::ChannelOptions copts;
+    copts.use_h2c = true;
+    auto ch = std::make_shared<rpcpio::Channel>(ioc, "127.0.0.1", 19999, copts);
+
+    ioc.stop();
+    // Shutdown() must run synchronously without hanging.
+    EXPECT_NO_THROW(ch->Shutdown());
+}

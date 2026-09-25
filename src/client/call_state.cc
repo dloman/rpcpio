@@ -1,5 +1,6 @@
 #include "call_state.h"
 
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
 #include "src/protocol/compression.h"
 #include "src/protocol/metadata_codec.h"
@@ -8,9 +9,11 @@
 namespace rpcpio::internal {
 
 ClientCallState::ClientCallState(boost::asio::io_context& ioc,
+                                  boost::asio::strand<boost::asio::io_context::executor_type> strand,
                                   ClientContext*           ctx,
                                   CompletionCb             cb)
     : ioc_(ioc)
+    , strand_(std::move(strand))
     , ctx_(ctx)
     , completion_(std::move(cb))
     , timer_(ioc)
@@ -25,10 +28,12 @@ void ClientCallState::ArmTimer() {
 
     timer_.expires_at(*dl);
     auto self = shared_from_this();
-    timer_.async_wait([self](const boost::system::error_code& ec) {
+    timer_.async_wait([self, strand = strand_](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted) return;
-        self->Complete(UnaryResultRaw{
-            Status{StatusCode::DEADLINE_EXCEEDED, "deadline exceeded"}});
+        boost::asio::dispatch(strand, [self]() {
+            self->Complete(UnaryResultRaw{
+                Status{StatusCode::DEADLINE_EXCEEDED, "deadline exceeded"}});
+        });
     });
 }
 
@@ -114,64 +119,70 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
 
     auto self = shared_from_this();
 
-    resp.on_data([self](const uint8_t* data, std::size_t len) {
-        if (self->completed_) return;
-        if (len == 0) {
-            self->decoder_.MarkEos();
+    resp.on_data([self, strand = strand_](const uint8_t* data, std::size_t len) {
+        std::string copy(reinterpret_cast<const char*>(data), len);
+        boost::asio::post(strand, [self, copy = std::move(copy)]() mutable {
+            if (self->completed_) return;
+            if (copy.empty()) {
+                self->decoder_.MarkEos();
+                if (self->decoder_.error()) {
+                    self->Complete(UnaryResultRaw{
+                        Status{StatusCode::INTERNAL,
+                               "frame error: " + self->decoder_.error_message()}});
+                }
+                return;
+            }
+            self->decoder_.Feed(copy);
             if (self->decoder_.error()) {
                 self->Complete(UnaryResultRaw{
                     Status{StatusCode::INTERNAL,
                            "frame error: " + self->decoder_.error_message()}});
             }
-            return;
-        }
-        self->decoder_.Feed({reinterpret_cast<const char*>(data), len});
-        if (self->decoder_.error()) {
-            self->Complete(UnaryResultRaw{
-                Status{StatusCode::INTERNAL,
-                       "frame error: " + self->decoder_.error_message()}});
-        }
+        });
     });
 
     // on_trailers is the Phase-1 extension to the CESNET nghttp2-asio API.
-    resp.on_trailers([self](const nghttp2::asio_http2::header_map& trailers) {
-        if (self->completed_) return;
-        self->trailers_done_ = true;
+    resp.on_trailers([self, strand = strand_](const nghttp2::asio_http2::header_map& trailers) {
+        nghttp2::asio_http2::header_map trailers_copy = trailers;
+        boost::asio::post(strand, [self, trailers_copy = std::move(trailers_copy)]() mutable {
+            if (self->completed_) return;
+            self->trailers_done_ = true;
 
-        self->result_.status = protocol::ExtractTrailerStatus(trailers);
-        protocol::Nghttp2HeadersToMetadata(trailers, self->result_.trailing_metadata);
+            self->result_.status = protocol::ExtractTrailerStatus(trailers_copy);
+            protocol::Nghttp2HeadersToMetadata(trailers_copy, self->result_.trailing_metadata);
 
-        if (!self->result_.status.ok()) {
-            self->Complete(std::move(self->result_));
-            return;
-        }
-
-        // Collect the raw (possibly compressed) payload from the decoder.
-        std::string_view raw_payload;
-        if (self->decoder_.done()) {
-            raw_payload = self->decoder_.payload();
-        }
-
-        // Decompress if the server signalled a non-identity encoding.
-        if (self->response_encoding_ &&
-            *self->response_encoding_ != protocol::Encoding::kIdentity &&
-            self->decoder_.compress_flag() != 0) {
-            const std::size_t max_size = self->ctx_
-                ? self->ctx_->max_receive_message_size()
-                : 4 * 1024 * 1024;
-            std::string decompressed;
-            if (!protocol::Decompress(*self->response_encoding_,
-                                      raw_payload, decompressed, max_size)) {
-                self->Complete(UnaryResultRaw{Status{
-                    StatusCode::INTERNAL, "response decompression failed"}});
+            if (!self->result_.status.ok()) {
+                self->Complete(std::move(self->result_));
                 return;
             }
-            self->result_.response_bytes = std::move(decompressed);
-        } else {
-            self->result_.response_bytes = std::string(raw_payload);
-        }
 
-        self->Complete(std::move(self->result_));
+            // Collect the raw (possibly compressed) payload from the decoder.
+            std::string_view raw_payload;
+            if (self->decoder_.done()) {
+                raw_payload = self->decoder_.payload();
+            }
+
+            // Decompress if the server signalled a non-identity encoding.
+            if (self->response_encoding_ &&
+                *self->response_encoding_ != protocol::Encoding::kIdentity &&
+                self->decoder_.compress_flag() != 0) {
+                const std::size_t max_size = self->ctx_
+                    ? self->ctx_->max_receive_message_size()
+                    : 4 * 1024 * 1024;
+                std::string decompressed;
+                if (!protocol::Decompress(*self->response_encoding_,
+                                          raw_payload, decompressed, max_size)) {
+                    self->Complete(UnaryResultRaw{Status{
+                        StatusCode::INTERNAL, "response decompression failed"}});
+                    return;
+                }
+                self->result_.response_bytes = std::move(decompressed);
+            } else {
+                self->result_.response_bytes = std::string(raw_payload);
+            }
+
+            self->Complete(std::move(self->result_));
+        });
     });
 }
 

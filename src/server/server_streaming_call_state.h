@@ -43,7 +43,8 @@ public:
         RawServerStreamingHandler                       handler,
         std::size_t                                     max_request_size,
         std::size_t                                     max_metadata_size,
-        std::size_t                                     max_response_size);
+        std::size_t                                     max_response_size,
+        std::string                                     peer_identity);
 
     // Register on_data callback and begin receiving the request body.
     void Start();
@@ -63,6 +64,7 @@ private:
     std::size_t                                    max_request_size_;
     std::size_t                                    max_metadata_size_;
     std::size_t                                    max_response_size_;
+    std::string                                    peer_identity_;
 
     protocol::FrameDecoder    decoder_;
     ServerContext             ctx_;

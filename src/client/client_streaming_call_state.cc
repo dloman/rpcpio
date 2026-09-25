@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -14,9 +15,11 @@ namespace rpcpio::internal {
 
 ClientStreamingClientCallState::ClientStreamingClientCallState(
         boost::asio::io_context& ioc,
+        boost::asio::strand<boost::asio::io_context::executor_type> strand,
         ClientContext*           ctx)
     : writer_impl_(std::make_shared<RawClientWriterImpl>(ioc))
     , ioc_(ioc)
+    , strand_(std::move(strand))
     , ctx_(ctx)
     , timer_(ioc)
 {}
@@ -28,9 +31,11 @@ void ClientStreamingClientCallState::ArmTimer() {
 
     timer_.expires_at(*dl);
     auto self = shared_from_this();
-    timer_.async_wait([self](const boost::system::error_code& ec) {
+    timer_.async_wait([self, strand = strand_](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted) return;
-        self->Fail(Status{StatusCode::DEADLINE_EXCEEDED, "deadline exceeded"});
+        boost::asio::dispatch(strand, [self]() {
+            self->Fail(Status{StatusCode::DEADLINE_EXCEEDED, "deadline exceeded"});
+        });
     });
 }
 
@@ -108,60 +113,59 @@ void ClientStreamingClientCallState::Attach(
         : 4 * 1024 * 1024;
 
     // on_data: accumulate the single response message.
-    resp.on_data([self, max_msg_size](const uint8_t* data, std::size_t len) {
-        if (self->closed_) return;
-        if (len == 0) return;  // EOS — handled by on_trailers
-
-        std::size_t pos = 0;
-        while (pos < len) {
-            if (!self->hdr_done_) {
-                const std::size_t need = 5 - self->hdr_bytes_;
-                const std::size_t take = std::min(need, len - pos);
-                std::memcpy(self->hdr_buf_.data() + self->hdr_bytes_,
-                            data + pos, take);
-                self->hdr_bytes_ += take;
-                pos += take;
-
-                if (self->hdr_bytes_ == 5) {
-                    self->hdr_done_ = true;
-                    self->payload_len_ =
-                        (uint32_t(self->hdr_buf_[1]) << 24) |
-                        (uint32_t(self->hdr_buf_[2]) << 16) |
-                        (uint32_t(self->hdr_buf_[3]) <<  8) |
-                         uint32_t(self->hdr_buf_[4]);
-                    if (self->payload_len_ > max_msg_size) {
-                        self->Fail(Status{StatusCode::RESOURCE_EXHAUSTED,
-                                          "received message too large"});
-                        return;
+    resp.on_data([self, max_msg_size, strand = strand_](const uint8_t* data, std::size_t len) {
+        if (len == 0) return;
+        std::string copy(reinterpret_cast<const char*>(data), len);
+        boost::asio::post(strand, [self, copy = std::move(copy), max_msg_size]() mutable {
+            if (self->closed_) return;
+            std::size_t pos = 0;
+            while (pos < copy.size()) {
+                if (!self->hdr_done_) {
+                    const std::size_t need = 5 - self->hdr_bytes_;
+                    const std::size_t take = std::min(need, copy.size() - pos);
+                    std::memcpy(self->hdr_buf_.data() + self->hdr_bytes_,
+                                copy.data() + pos, take);
+                    self->hdr_bytes_ += take;
+                    pos += take;
+                    if (self->hdr_bytes_ == 5) {
+                        self->hdr_done_ = true;
+                        self->payload_len_ =
+                            (uint32_t(self->hdr_buf_[1]) << 24) |
+                            (uint32_t(self->hdr_buf_[2]) << 16) |
+                            (uint32_t(self->hdr_buf_[3]) <<  8) |
+                             uint32_t(self->hdr_buf_[4]);
+                        if (self->payload_len_ > max_msg_size) {
+                            self->Fail(Status{StatusCode::RESOURCE_EXHAUSTED,
+                                              "received message too large"});
+                            return;
+                        }
+                        self->payload_buf_.clear();
+                        self->payload_buf_.reserve(self->payload_len_);
                     }
-                    self->payload_buf_.clear();
-                    self->payload_buf_.reserve(self->payload_len_);
-                }
-            } else {
-                const std::size_t need = self->payload_len_ - self->payload_buf_.size();
-                const std::size_t take = std::min(need, len - pos);
-                self->payload_buf_.append(
-                    reinterpret_cast<const char*>(data) + pos, take);
-                pos += take;
-
-                if (self->payload_buf_.size() == self->payload_len_) {
-                    // Store the single server response.
-                    self->writer_impl_->response_bytes_ = self->payload_buf_;
-                    // Reset parser (in case there is any extra data, which would
-                    // be a protocol error, but we don't reject it here).
-                    self->hdr_done_    = false;
-                    self->hdr_bytes_   = 0;
-                    self->payload_len_ = 0;
-                    self->payload_buf_.clear();
+                } else {
+                    const std::size_t need = self->payload_len_ - self->payload_buf_.size();
+                    const std::size_t take = std::min(need, copy.size() - pos);
+                    self->payload_buf_.append(copy.data() + pos, take);
+                    pos += take;
+                    if (self->payload_buf_.size() == self->payload_len_) {
+                        self->writer_impl_->response_bytes_ = self->payload_buf_;
+                        self->hdr_done_    = false;
+                        self->hdr_bytes_   = 0;
+                        self->payload_len_ = 0;
+                        self->payload_buf_.clear();
+                    }
                 }
             }
-        }
+        });
     });
 
-    resp.on_trailers([self](const nghttp2::asio_http2::header_map& trailers) {
-        if (self->closed_) return;
-        Status s = protocol::ExtractTrailerStatus(trailers);
-        self->MaybeDeliverStatus(std::move(s));
+    resp.on_trailers([self, strand = strand_](const nghttp2::asio_http2::header_map& trailers) {
+        nghttp2::asio_http2::header_map trailers_copy = trailers;
+        boost::asio::post(strand, [self, trailers_copy = std::move(trailers_copy)]() mutable {
+            if (self->closed_) return;
+            Status s = protocol::ExtractTrailerStatus(trailers_copy);
+            self->MaybeDeliverStatus(std::move(s));
+        });
     });
 }
 

@@ -7,8 +7,11 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <nghttp2/asio_http2_server.h>
+#include <openssl/x509.h>
 #include "src/protocol/metadata_codec.h"
 #include "src/protocol/status_map.h"
+
+static thread_local std::string tl_pending_peer_identity;
 
 namespace rpcpio::internal {
 
@@ -56,6 +59,8 @@ std::uint16_t ServerImpl::ResolvePort(std::uint16_t port) {
 }
 
 rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
+    if (started_.exchange(true))
+        return Status{StatusCode::FAILED_PRECONDITION, "Server::Start called more than once"};
     port = ResolvePort(port);
     bound_port_ = port;
     auto self = this;
@@ -87,6 +92,18 @@ rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
                                   "CA cert file: " + ec.message()};
             ssl_ctx.set_verify_mode(boost::asio::ssl::verify_peer |
                                     boost::asio::ssl::verify_fail_if_no_peer_cert);
+            ssl_ctx.set_verify_callback(
+                [](bool preverified, boost::asio::ssl::verify_context& vctx) -> bool {
+                    if (preverified) {
+                        X509* cert = X509_STORE_CTX_get_current_cert(vctx.native_handle());
+                        if (cert) {
+                            char buf[256] = {};
+                            X509_NAME_oneline(X509_get_subject_name(cert), buf, sizeof(buf) - 1);
+                            tl_pending_peer_identity = buf;
+                        }
+                    }
+                    return preverified;
+                });
         }
 
         // ALPN h2
@@ -171,6 +188,9 @@ void ServerImpl::HandleRequest(
         return;
     }
 
+    // Extract mTLS peer identity (populated by the SSL verify callback, if any).
+    std::string peer_identity = std::exchange(tl_pending_peer_identity, {});
+
     // Look up handler: check all four RPC kind maps in order.
     {
         auto it = handlers_.find(path);
@@ -179,7 +199,8 @@ void ServerImpl::HandleRequest(
                 ioc_, req, resp, it->second,
                 opts_.max_request_message_size,
                 opts_.max_metadata_size,
-                opts_.max_response_message_size);
+                opts_.max_response_message_size,
+                peer_identity);
             state->Start();
             return;
         }
@@ -191,7 +212,8 @@ void ServerImpl::HandleRequest(
                 ioc_, req, resp, it->second,
                 opts_.max_request_message_size,
                 opts_.max_metadata_size,
-                opts_.max_response_message_size);
+                opts_.max_response_message_size,
+                peer_identity);
             state->Start();
             return;
         }
@@ -203,7 +225,8 @@ void ServerImpl::HandleRequest(
                 ioc_, req, resp, it->second,
                 opts_.max_request_message_size,
                 opts_.max_metadata_size,
-                opts_.max_response_message_size);
+                opts_.max_response_message_size,
+                peer_identity);
             state->Start();
             return;
         }
@@ -215,7 +238,8 @@ void ServerImpl::HandleRequest(
                 ioc_, req, resp, it->second,
                 opts_.max_request_message_size,
                 opts_.max_metadata_size,
-                opts_.max_response_message_size);
+                opts_.max_response_message_size,
+                peer_identity);
             state->Start();
             return;
         }

@@ -160,8 +160,8 @@ public:
     Server(const Server&)            = delete;
     Server& operator=(const Server&) = delete;
 
-private:
-    // Type-erased registrations; implemented in server_impl.cc.
+    // Type-erased raw registrations (useful for tests and code generators).
+    // Must be called before Start().
     using RawHandler = std::function<
         boost::asio::awaitable<Status>(
             ServerContext&, std::string_view, std::string&)>;
@@ -182,6 +182,8 @@ private:
     void RegisterServerStreamingRaw(std::string_view path, RawServerStreamingHandler handler);
     void RegisterClientStreamingRaw(std::string_view path, RawClientStreamingHandler handler);
     void RegisterBidiRaw(std::string_view path, RawBidiStreamingHandler handler);
+
+private:
 
     std::shared_ptr<internal::ServerImpl> impl_;
 };

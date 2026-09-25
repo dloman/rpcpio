@@ -46,7 +46,7 @@ Boost.Asio coroutines. The result is a library that:
 | Library | Version | Role |
 |---------|---------|------|
 | [nghttp2-asio](https://github.com/cesnet/nghttp2) (CESNET fork) | `0.0.90-20260225-464f056` | HTTP/2 framing + TLS |
-| Boost.Asio | ≥ 1.82 | async executor, coroutines, TLS |
+| Boost.Asio | ≥ 1.87 | async executor, coroutines, TLS |
 | Protocol Buffers | 27.x | message serialisation |
 | zlib | 1.3.x | gzip compression (optional) |
 

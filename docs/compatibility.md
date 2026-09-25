@@ -20,8 +20,8 @@ All versions are resolved by the GM Bazel Central Registry (BCR).
 
 | Dependency                | Version pinned in BCR |
 |---------------------------|-----------------------|
-| nghttp2-asio (CESNET fork)| `0.0.90-20260225-464f056` |
-| Boost (Asio, Thread, DateTime) | 1.90            |
+| nghttp2-asio (CESNET fork)| `0.0.90-20260225-464f056` (next target: 0.0.91) |
+| Boost (Asio, Thread, DateTime) | 1.90 (minimum: 1.87) |
 | libnghttp2                | 1.65.0                |
 | OpenSSL                   | 3.5.5                 |
 | protobuf                  | 27.3                  |

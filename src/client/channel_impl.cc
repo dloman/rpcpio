@@ -81,8 +81,10 @@ void ChannelImpl::DoConnect() {
                                            boost::asio::ssl::context::pem, tls_ec);
         }
         if (tls_ec) {
-            // Surface as INVALID_ARGUMENT connection failure (already on strand).
-            OnConnected(tls_ec);
+            // TLS configuration errors are permanent — wrong file path never self-heals.
+            state_ = ConnState::kShutdown;
+            DrainWithStatus(Status{StatusCode::INVALID_ARGUMENT,
+                                   "TLS configuration: " + tls_ec.message()});
             return;
         }
 
@@ -166,41 +168,48 @@ void ChannelImpl::DoConnect() {
     }
 }
 
+void ChannelImpl::DoShutdown() {
+    if (state_ == ConnState::kShutdown) return;
+    state_ = ConnState::kShutdown;
+
+    // Close any session being established.
+    if (connecting_session_) {
+        connecting_session_->shutdown();
+        connecting_session_.reset();
+    }
+    // Close any established session.
+    if (session_) {
+        session_->shutdown();
+        session_.reset();
+    }
+
+    // Drain connect waiters.
+    auto waiters = std::move(connect_waiters_);
+    for (auto& w : waiters)
+        w(boost::asio::error::operation_aborted);
+
+    // Fail active unary calls.
+    Status cancelled{StatusCode::CANCELLED, "channel shut down"};
+    for (auto& [id, call] : active_calls_)
+        call->Fail(cancelled);
+    active_calls_.clear();
+
+    // Fail active streaming calls.
+    for (auto& [id, cb] : active_streaming_calls_)
+        cb(cancelled);
+    active_streaming_calls_.clear();
+
+    FailAll(cancelled);
+}
+
 void ChannelImpl::Shutdown() {
-    boost::asio::dispatch(strand_,
-        [self = shared_from_this()]() {
-            if (self->state_ == ConnState::kShutdown) return;  // idempotent
-            self->state_ = ConnState::kShutdown;
-
-            // Close any session being established.
-            if (self->connecting_session_) {
-                self->connecting_session_->shutdown();
-                self->connecting_session_.reset();
-            }
-            // Close any established session.
-            if (self->session_) {
-                self->session_->shutdown();
-                self->session_.reset();
-            }
-
-            // Drain connect waiters.
-            auto waiters = std::move(self->connect_waiters_);
-            for (auto& w : waiters)
-                w(boost::asio::error::operation_aborted);
-
-            // Fail active unary calls.
-            Status cancelled{StatusCode::CANCELLED, "channel shut down"};
-            for (auto& [id, call] : self->active_calls_)
-                call->Fail(cancelled);
-            self->active_calls_.clear();
-
-            // Fail active streaming calls.
-            for (auto& [id, cb] : self->active_streaming_calls_)
-                cb(cancelled);
-            self->active_streaming_calls_.clear();
-
-            self->FailAll(cancelled);
-        });
+    if (ioc_.stopped()) {
+        // io_context is stopped — no handlers are running, safe to execute directly.
+        DoShutdown();
+    } else {
+        boost::asio::dispatch(strand_,
+            [self = shared_from_this()]() { self->DoShutdown(); });
+    }
 }
 
 void ChannelImpl::OnGoaway(std::uint32_t /*error_code*/,
@@ -244,6 +253,7 @@ void ChannelImpl::RemoveActiveCall(std::int32_t stream_id) {
 }
 
 void ChannelImpl::OnConnected(boost::system::error_code ec) {
+    connecting_session_.reset();  // always clear — no-op on success path (already cleared in on_connect)
     state_ = ec ? ConnState::kFailed : ConnState::kReady;
     DrainQueue(ec);
 }
@@ -273,6 +283,13 @@ void ChannelImpl::FailAll(Status status) {
 
     auto generic_pending = std::move(pending_generic_calls_);
     for (auto& fn : generic_pending) fn();
+}
+
+void ChannelImpl::DrainWithStatus(Status st) {
+    auto waiters = std::move(connect_waiters_);
+    for (auto& w : waiters)
+        w(boost::asio::error::operation_aborted);
+    FailAll(st);
 }
 
 void ChannelImpl::SubmitCall(std::string                         path,
@@ -351,7 +368,7 @@ void ChannelImpl::SubmitCall(std::string                         path,
 
             // Create the per-call state before submit to avoid a race.
             auto call = std::make_shared<ClientCallState>(
-                self->ioc_, ctx, std::move(completion));
+                self->ioc_, self->strand_, ctx, std::move(completion));
 
             boost::system::error_code ec;
             auto req = self->session_->submit(
@@ -444,7 +461,7 @@ void ChannelImpl::SubmitServerStreamingCall(
          completion = std::move(completion)]() mutable {
             if (self->state_ == ConnState::kShutdown) {
                 auto call = std::make_shared<ServerStreamingClientCallState>(
-                    self->ioc_, ctx);
+                    self->ioc_, self->strand_, ctx);
                 call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
                 completion(call->TakeReader());
                 return;
@@ -467,7 +484,7 @@ void ChannelImpl::SubmitServerStreamingCall(
             }
             if (self->state_ == ConnState::kFailed) {
                 auto call = std::make_shared<ServerStreamingClientCallState>(
-                    self->ioc_, ctx);
+                    self->ioc_, self->strand_, ctx);
                 call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
                 completion(call->TakeReader());
                 return;
@@ -480,7 +497,7 @@ void ChannelImpl::SubmitServerStreamingCall(
                 if (!BuildStreamingGrpcHeaders(
                         self->host_, self->opts_, ctx, hdrs, err)) {
                     auto call = std::make_shared<ServerStreamingClientCallState>(
-                        self->ioc_, ctx);
+                        self->ioc_, self->strand_, ctx);
                     call->Fail(std::move(err));
                     completion(call->TakeReader());
                     return;
@@ -491,7 +508,7 @@ void ChannelImpl::SubmitServerStreamingCall(
             std::string frame;
             if (!protocol::EncodeFrame(0, request_bytes, frame)) {
                 auto call = std::make_shared<ServerStreamingClientCallState>(
-                    self->ioc_, ctx);
+                    self->ioc_, self->strand_, ctx);
                 call->Fail(Status{StatusCode::RESOURCE_EXHAUSTED,
                                   "request too large"});
                 completion(call->TakeReader());
@@ -499,7 +516,7 @@ void ChannelImpl::SubmitServerStreamingCall(
             }
 
             auto call = std::make_shared<ServerStreamingClientCallState>(
-                self->ioc_, ctx);
+                self->ioc_, self->strand_, ctx);
 
             boost::system::error_code ec;
             auto req = self->session_->submit(
@@ -575,7 +592,7 @@ void ChannelImpl::SubmitClientStreamingCall(
          completion = std::move(completion)]() mutable {
             if (self->state_ == ConnState::kShutdown) {
                 auto call = std::make_shared<ClientStreamingClientCallState>(
-                    self->ioc_, ctx);
+                    self->ioc_, self->strand_, ctx);
                 call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
                 completion(call->TakeWriter());
                 return;
@@ -596,7 +613,7 @@ void ChannelImpl::SubmitClientStreamingCall(
             }
             if (self->state_ == ConnState::kFailed) {
                 auto call = std::make_shared<ClientStreamingClientCallState>(
-                    self->ioc_, ctx);
+                    self->ioc_, self->strand_, ctx);
                 call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
                 completion(call->TakeWriter());
                 return;
@@ -609,7 +626,7 @@ void ChannelImpl::SubmitClientStreamingCall(
                 if (!BuildStreamingGrpcHeaders(
                         self->host_, self->opts_, ctx, hdrs, err)) {
                     auto call = std::make_shared<ClientStreamingClientCallState>(
-                        self->ioc_, ctx);
+                        self->ioc_, self->strand_, ctx);
                     call->Fail(std::move(err));
                     completion(call->TakeWriter());
                     return;
@@ -617,7 +634,7 @@ void ChannelImpl::SubmitClientStreamingCall(
             }
 
             auto call = std::make_shared<ClientStreamingClientCallState>(
-                self->ioc_, ctx);
+                self->ioc_, self->strand_, ctx);
             auto writer_impl = call->writer_impl_;
 
             // Submit with a generator callback that drains writer_impl->pending_.
@@ -675,7 +692,7 @@ void ChannelImpl::SubmitBidiStreamingCall(
          completion = std::move(completion)]() mutable {
             if (self->state_ == ConnState::kShutdown) {
                 auto call = std::make_shared<BidiStreamingClientCallState>(
-                    self->ioc_, ctx);
+                    self->ioc_, self->strand_, ctx);
                 call->Fail(Status{StatusCode::CANCELLED, "channel shut down"});
                 completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
                 return;
@@ -696,7 +713,7 @@ void ChannelImpl::SubmitBidiStreamingCall(
             }
             if (self->state_ == ConnState::kFailed) {
                 auto call = std::make_shared<BidiStreamingClientCallState>(
-                    self->ioc_, ctx);
+                    self->ioc_, self->strand_, ctx);
                 call->Fail(Status{StatusCode::UNAVAILABLE, "channel failed"});
                 completion(BidiHandles{call->TakeReader(), call->TakeWriter()});
                 return;
@@ -709,7 +726,7 @@ void ChannelImpl::SubmitBidiStreamingCall(
                 if (!BuildStreamingGrpcHeaders(
                         self->host_, self->opts_, ctx, hdrs, err)) {
                     auto call = std::make_shared<BidiStreamingClientCallState>(
-                        self->ioc_, ctx);
+                        self->ioc_, self->strand_, ctx);
                     call->Fail(std::move(err));
                     completion(BidiHandles{
                         call->TakeReader(), call->TakeWriter()});
@@ -718,7 +735,7 @@ void ChannelImpl::SubmitBidiStreamingCall(
             }
 
             auto call = std::make_shared<BidiStreamingClientCallState>(
-                self->ioc_, ctx);
+                self->ioc_, self->strand_, ctx);
             auto writer_impl = call->writer_impl_;
 
             boost::system::error_code ec;

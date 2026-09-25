@@ -7,6 +7,7 @@
 #include <string>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <nghttp2/asio_http2_client.h>
 #include "rpcpio/client_context.h"
 #include "rpcpio/internal/raw_result.h"
@@ -24,6 +25,7 @@ public:
     using CompletionCb = std::function<void(UnaryResultRaw)>;
 
     ClientCallState(boost::asio::io_context& ioc,
+                    boost::asio::strand<boost::asio::io_context::executor_type> strand,
                     ClientContext*           ctx,
                     CompletionCb             cb);
 
@@ -54,6 +56,8 @@ private:
     protocol::FrameDecoder           decoder_;
     UnaryResultRaw                   result_;
     std::optional<protocol::Encoding> response_encoding_;  // from grpc-encoding header
+
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
 
     std::atomic<bool>           completed_{false};
     bool                        initial_meta_done_{false};

@@ -139,6 +139,20 @@ fires.
 `RegisterUnary` must be called before `Server::Start()`.  After `Start()`,
 the handler map is immutable.
 
+### Verifying Strand Safety with TSan
+
+All client-side call state mutations are confined to `ChannelImpl::strand_`
+via `boost::asio::post(strand_, ...)` in the `on_data`, `on_trailers`, and
+deadline timer callbacks.  To verify this under TSan, run:
+
+```bash
+bazel test //tests/unit/... --config=tsan
+```
+
+The `strand_test` spawns 20 concurrent calls across 4 worker threads; TSan
+will report unsynchronized access to call state if strand confinement is
+violated.
+
 ---
 
 ## GOAWAY Handling

@@ -8,6 +8,7 @@
 #include <string>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <nghttp2/asio_http2_client.h>
 #include "rpcpio/client_context.h"
 #include "rpcpio/status.h"
@@ -28,6 +29,7 @@ class BidiStreamingClientCallState
 {
 public:
     BidiStreamingClientCallState(boost::asio::io_context& ioc,
+                                 boost::asio::strand<boost::asio::io_context::executor_type> strand,
                                  ClientContext*           ctx);
 
     // Called by ChannelImpl after submit() returns the request and response.
@@ -60,6 +62,7 @@ private:
     void MaybeDeliverStatus(Status s);
 
     boost::asio::io_context&  ioc_;
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
     ClientContext*             ctx_;
     boost::asio::steady_timer  timer_;
 
