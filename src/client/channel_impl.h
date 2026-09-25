@@ -9,6 +9,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl/context.hpp>
@@ -37,10 +38,10 @@ enum class ConnState { kIdle, kConnecting, kReady, kFailed, kShutdown };
 // class safe to call from any thread running the associated io_context.
 class ChannelImpl : public std::enable_shared_from_this<ChannelImpl> {
 public:
-    ChannelImpl(boost::asio::io_context& ioc,
-                std::string              host,
-                std::uint16_t            port,
-                ChannelOptions           opts);
+    ChannelImpl(boost::asio::any_io_executor executor,
+                std::string                 host,
+                std::uint16_t               port,
+                ChannelOptions              opts);
 
     ~ChannelImpl();
 
@@ -87,7 +88,7 @@ public:
     const ChannelOptions&    opts() const noexcept { return opts_; }
 
     // Expose strand so callers can post work serialized with ChannelImpl state.
-    const boost::asio::strand<boost::asio::io_context::executor_type>&
+    const boost::asio::any_io_executor&
     strand() const noexcept { return strand_; }
 
 private:
@@ -118,7 +119,7 @@ private:
     };
 
     boost::asio::io_context&              ioc_;
-    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+    boost::asio::any_io_executor              strand_;
     std::string                           host_;
     std::uint16_t                         port_;
     ChannelOptions                        opts_;

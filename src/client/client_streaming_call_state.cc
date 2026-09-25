@@ -15,7 +15,7 @@ namespace rpcpio::internal {
 
 ClientStreamingClientCallState::ClientStreamingClientCallState(
         boost::asio::io_context& ioc,
-        boost::asio::strand<boost::asio::io_context::executor_type> strand,
+        boost::asio::any_io_executor strand,
         ClientContext*           ctx)
     : writer_impl_(std::make_shared<RawClientWriterImpl>(ioc, strand))
     , ioc_(ioc)
@@ -199,8 +199,8 @@ RawClientWriter::WritesDone() {
 boost::asio::awaitable<Status>
 RawClientWriter::Finish() {
     using namespace std::chrono;
-    while (!impl_->status_ready_) {
-        impl_->status_timer_.expires_at(steady_clock::time_point::max());
+    while (!impl_->status_ready_.load(std::memory_order_acquire)) {
+        impl_->status_timer_.expires_after(milliseconds(1));
         boost::system::error_code ec;
         co_await impl_->status_timer_.async_wait(
             boost::asio::redirect_error(boost::asio::use_awaitable, ec));

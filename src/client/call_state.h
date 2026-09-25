@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
@@ -25,7 +26,7 @@ public:
     using CompletionCb = std::function<void(UnaryResultRaw)>;
 
     ClientCallState(boost::asio::io_context& ioc,
-                    boost::asio::strand<boost::asio::io_context::executor_type> strand,
+                    boost::asio::any_io_executor strand,
                     ClientContext*           ctx,
                     CompletionCb             cb);
 
@@ -57,7 +58,7 @@ private:
     UnaryResultRaw                   result_;
     std::optional<protocol::Encoding> response_encoding_;  // from grpc-encoding header
 
-    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+    boost::asio::any_io_executor strand_;
 
     std::atomic<bool>           completed_{false};
     bool                        initial_meta_done_{false};

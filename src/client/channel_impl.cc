@@ -233,12 +233,12 @@ private:
     std::atomic<bool> completed_{false};
 };
 
-ChannelImpl::ChannelImpl(boost::asio::io_context& ioc,
-                         std::string              host,
-                         std::uint16_t            port,
-                         ChannelOptions           opts)
-    : ioc_(ioc)
-    , strand_(ioc.get_executor())
+ChannelImpl::ChannelImpl(boost::asio::any_io_executor executor,
+                         std::string                 host,
+                         std::uint16_t               port,
+                         ChannelOptions              opts)
+    : ioc_(static_cast<boost::asio::io_context&>(executor.context()))
+    , strand_(boost::asio::make_strand(std::move(executor)))
     , host_(std::move(host))
     , port_(port)
     , opts_(std::move(opts))
@@ -1028,8 +1028,16 @@ Channel::Channel(boost::asio::io_context& ioc,
                  std::string              host,
                  std::uint16_t            port,
                  ChannelOptions           opts)
+    : Channel(
+          ioc.get_executor(), std::move(host), port, std::move(opts))
+{}
+
+Channel::Channel(boost::asio::any_io_executor executor,
+                 std::string                 host,
+                 std::uint16_t               port,
+                 ChannelOptions              opts)
     : impl_(std::make_shared<internal::ChannelImpl>(
-          ioc, std::move(host), port, std::move(opts)))
+          std::move(executor), std::move(host), port, std::move(opts)))
 {}
 
 // The session callbacks keep ChannelImpl alive, so without an explicit shutdown

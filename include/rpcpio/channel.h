@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <google/protobuf/message.h>
@@ -50,10 +51,17 @@ Status ValidateChannelOptions(const ChannelOptions& options);
 class Channel {
 public:
     // host: hostname or IP; port: 443 default for TLS, 80 for h2c
+    // The executor overload accepts an executor backed by an io_context.
+    // Transport and call-state operations are serialized on an internal
+    // strand; the io_context overload is a convenience wrapper.
     Channel(boost::asio::io_context& ioc,
             std::string              host,
             std::uint16_t            port,
             ChannelOptions           opts = {});
+    Channel(boost::asio::any_io_executor executor,
+            std::string                 host,
+            std::uint16_t               port,
+            ChannelOptions              opts = {});
     ~Channel();
 
     // Proactively establish the connection (optional; first UnaryCall connects

@@ -152,9 +152,9 @@ deadline timer callbacks.  To verify this under TSan, run:
 bazel test //tests/unit/... --config=tsan
 ```
 
-The `strand_test` spawns 20 concurrent calls across 4 worker threads; TSan
-will report unsynchronized access to call state if strand confinement is
-violated.
+The `strand_test` runs 1,000 mixed unary and streaming calls across four
+workers and shuts the channel down while calls are active. TSan reports any
+unsynchronized access to transport or call state.
 
 ---
 

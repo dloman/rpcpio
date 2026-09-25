@@ -1,10 +1,12 @@
 #pragma once
 
+#include <atomic>
 #include <deque>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
@@ -26,13 +28,12 @@ struct RawClientReaderImpl {
 
     StreamMessageQueue        msg_queue_;
     Status                    final_status_;
-    bool                      status_ready_{false};
+    std::atomic<bool>         status_ready_{false};
     boost::asio::steady_timer status_timer_;  // woken when on_trailers fires
 
     void SetFinalStatus(Status s) {
         final_status_  = std::move(s);
-        status_ready_  = true;
-        status_timer_.cancel();
+        status_ready_.store(true, std::memory_order_release);
     }
 };
 
@@ -46,12 +47,12 @@ struct RawClientWriterImpl
     : std::enable_shared_from_this<RawClientWriterImpl> {
     RawClientWriterImpl(
             boost::asio::io_context& ioc,
-            boost::asio::strand<boost::asio::io_context::executor_type> strand)
+            boost::asio::any_io_executor strand)
         : strand_(std::move(strand))
         , status_timer_(ioc, std::chrono::steady_clock::time_point::max())
     {}
 
-    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+    boost::asio::any_io_executor strand_;
 
     // Set once submit() succeeds and cleared when the stream closes, because
     // nghttp2-asio frees the request at close.
@@ -67,13 +68,12 @@ struct RawClientWriterImpl
 
     // Final grpc-status from server trailing headers.
     Status                    final_status_;
-    bool                      status_ready_{false};
+    std::atomic<bool>         status_ready_{false};
     boost::asio::steady_timer status_timer_;
 
     void SetFinalStatus(Status s) {
         final_status_  = std::move(s);
-        status_ready_  = true;
-        status_timer_.cancel();
+        status_ready_.store(true, std::memory_order_release);
     }
 
     // Encode proto_bytes as an LPM frame, enqueue it, and wake the generator.

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
@@ -27,7 +28,7 @@ class ServerStreamingClientCallState
 {
 public:
     ServerStreamingClientCallState(boost::asio::io_context& ioc,
-                                   boost::asio::strand<boost::asio::io_context::executor_type> strand,
+                                   boost::asio::any_io_executor strand,
                                    ClientContext*           ctx);
 
     // Called by ChannelImpl after submit() returns, with the server response.
@@ -56,7 +57,7 @@ private:
     void MaybeDeliverStatus(Status s);
 
     boost::asio::io_context&  ioc_;
-    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+    boost::asio::any_io_executor strand_;
     ClientContext*             ctx_;
     boost::asio::steady_timer  timer_;
 

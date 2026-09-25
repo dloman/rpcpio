@@ -9,7 +9,7 @@
 namespace rpcpio::internal {
 
 ClientCallState::ClientCallState(boost::asio::io_context& ioc,
-                                  boost::asio::strand<boost::asio::io_context::executor_type> strand,
+                                  boost::asio::any_io_executor strand,
                                   ClientContext*           ctx,
                                   CompletionCb             cb)
     : ioc_(ioc)

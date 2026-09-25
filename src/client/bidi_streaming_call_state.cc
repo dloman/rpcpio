@@ -13,7 +13,7 @@ namespace rpcpio::internal {
 
 BidiStreamingClientCallState::BidiStreamingClientCallState(
         boost::asio::io_context& ioc,
-        boost::asio::strand<boost::asio::io_context::executor_type> strand,
+        boost::asio::any_io_executor strand,
         ClientContext*           ctx)
     : reader_impl_(std::make_shared<RawClientReaderImpl>(ioc))
     , writer_impl_(std::make_shared<RawClientWriterImpl>(ioc, strand))
