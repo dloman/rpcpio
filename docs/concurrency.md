@@ -2,9 +2,9 @@
 
 ## Threading Model
 
-`rpcpio` uses **Boost.Asio** as its execution framework.  All internal state
-is confined to a single `boost::asio::io_context` (the "channel executor") and
-is accessed only from threads running that context.
+`rpcpio` uses **Boost.Asio** as its execution framework. Client transport state
+is confined to the channel strand even when several threads run its
+`io_context`.
 
 ### Client
 
@@ -22,10 +22,9 @@ is accessed only from threads running that context.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Key invariant:** nghttp2-asio callbacks are never allowed to run user
-completion handlers directly.  `ClientCallState::Complete` always uses
-`boost::asio::post` to deliver results back through the Asio executor, ensuring
-that user code never runs inside an nghttp2 callback frame.
+**Key invariant:** nghttp2-asio callbacks never run user completion handlers
+directly. Unary completion is posted to the awaiting coroutine's associated
+executor, which can differ from the channel executor.
 
 ### Server
 
@@ -43,8 +42,9 @@ that user code never runs inside an nghttp2 callback frame.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Worker threads call `ioc.run()`.  Handlers are spawned onto the same executor,
-so no additional synchronisation is required within a single call.
+By default the caller runs the server `io_context`. A nonzero
+`ServerOptions::num_threads` gives the server a private context and workers.
+Each call runs on its connection executor.
 
 ---
 
@@ -90,9 +90,11 @@ so no additional synchronisation is required within a single call.
 
 ### Client
 
-1. `ClientContext::Cancel()` emits `boost::asio::cancellation_type::all`.
-2. The `Channel::UnaryCall` template propagates this to `UnaryCallRaw`.
-3. `async_initiate` resolves the awaitable with `CANCELLED` status.
+1. `ClientContext::Cancel()` or the awaiting coroutine's cancellation slot
+   emits `boost::asio::cancellation_type::all`.
+2. `UnaryCallRaw` resolves the awaitable with `CANCELLED` on the caller
+   executor, including while a connection is pending.
+3. The single-fire completion gate drops any later transport completion.
 4. Simultaneously, a RST_STREAM CANCEL is sent to the server.
 5. The deadline timer is also cancelled via `timer_.cancel()`.
 
@@ -114,7 +116,8 @@ Every call state uses `std::atomic<bool> completed_` as a single-fire gate:
 void Complete(UnaryResultRaw result) {
     if (completed_.exchange(true)) return;   // second caller is dropped
     timer_.cancel();
-    boost::asio::post(ioc_, [cb = std::move(cb), r = std::move(result)] {
+    boost::asio::post(caller_executor,
+                      [cb = std::move(cb), r = std::move(result)] {
         cb(std::move(r));
     });
 }

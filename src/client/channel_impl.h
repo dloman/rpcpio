@@ -27,6 +27,7 @@ class ClientCallState;
 class ServerStreamingClientCallState;
 class ClientStreamingClientCallState;
 class BidiStreamingClientCallState;
+class UnaryCallControl;
 
 // State of the shared connection.
 enum class ConnState { kIdle, kConnecting, kReady, kFailed, kShutdown };
@@ -54,7 +55,8 @@ public:
     void SubmitCall(std::string                              path,
                     ClientContext*                           ctx,
                     std::string                              request_bytes,
-                    std::function<void(UnaryResultRaw)>      completion);
+                    std::function<void(UnaryResultRaw)>      completion,
+                    std::shared_ptr<UnaryCallControl>        control = {});
 
     // Submit a server-streaming call (single request, many responses).
     void SubmitServerStreamingCall(
@@ -112,6 +114,7 @@ private:
         ClientContext*                     ctx;
         std::string                        request_bytes;
         std::function<void(UnaryResultRaw)> completion;
+        std::shared_ptr<UnaryCallControl>   control;
     };
 
     boost::asio::io_context&              ioc_;

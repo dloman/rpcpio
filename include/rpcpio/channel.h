@@ -9,10 +9,10 @@
 #include <boost/asio/io_context.hpp>
 #include <google/protobuf/message.h>
 #include "rpcpio/client_context.h"
-#include "rpcpio/internal/raw_result.h"
 #include "rpcpio/internal/raw_client_reader.h"
 #include "rpcpio/internal/raw_client_writer.h"
 #include "rpcpio/status.h"
+#include "rpcpio/unary_result_raw.h"
 #include "rpcpio/unary_method.h"
 #include "rpcpio/streaming_method.h"
 #include "rpcpio/client_reader.h"
@@ -79,7 +79,7 @@ public:
         }
 
         // Type-erased wire call.
-        internal::UnaryResultRaw raw =
+        UnaryResultRaw raw =
             co_await UnaryCallRaw(method.path, ctx, req_bytes);
 
         // Assemble typed result.
@@ -143,13 +143,17 @@ public:
 
     // Execute one unary RPC on serialized protobuf bytes, for callers without
     // generated message types (proxies, code generators, language bindings).
-    // |ctx| must outlive the returned awaitable.
-    boost::asio::awaitable<internal::UnaryResultRaw>
+    // |ctx| must outlive the operation. ClientContext::Cancel() or cancellation
+    // of the awaiting coroutine completes it once with CANCELLED and resets an
+    // in-flight stream. The coroutine resumes on its associated executor.
+    boost::asio::awaitable<UnaryResultRaw>
     UnaryCallRaw(std::string_view path,
                  ClientContext&   ctx,
                  std::string_view request_bytes);
 
-    // Raw streaming counterparts of the typed calls above, on the same terms.
+    // Raw streaming counterparts of the typed calls above. Their awaitables
+    // produce stream handles; cancellation after that point is reported by
+    // operations on those handles.
     struct RawBidiHandles {
         internal::RawClientReader reader;
         internal::RawClientWriter writer;

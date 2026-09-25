@@ -13,11 +13,11 @@ ClientCallState::ClientCallState(boost::asio::io_context& ioc,
                                   ClientContext*           ctx,
                                   CompletionCb             cb)
     : ioc_(ioc)
-    , strand_(std::move(strand))
     , ctx_(ctx)
     , completion_(std::move(cb))
     , timer_(ioc)
     , decoder_(ctx ? ctx->max_receive_message_size() : 4 * 1024 * 1024)
+    , strand_(std::move(strand))
 {}
 
 void ClientCallState::ArmTimer() {

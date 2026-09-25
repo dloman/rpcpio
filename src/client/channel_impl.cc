@@ -9,6 +9,9 @@
 #include <cstring>
 #include <exception>
 #include <boost/asio/post.hpp>
+#include <boost/asio/associated_cancellation_slot.hpp>
+#include <boost/asio/associated_executor.hpp>
+#include <boost/asio/any_io_executor.hpp>
 #include <nghttp2/asio_http2_client.h>
 #include <nghttp2/nghttp2.h>
 #include <openssl/err.h>
@@ -144,6 +147,91 @@ Status ValidateChannelOptions(const ChannelOptions& options) {
 } // namespace rpcpio
 
 namespace rpcpio::internal {
+
+class UnaryCallControl {
+public:
+    void Cancel() {
+        cancelled_.store(true, std::memory_order_release);
+        std::function<void()> cancel_stream;
+        {
+            std::lock_guard lock(mutex_);
+            cancel_stream = cancel_stream_;
+        }
+        if (cancel_stream) {
+            cancel_stream();
+        }
+    }
+
+    bool cancelled() const noexcept {
+        return cancelled_.load(std::memory_order_acquire);
+    }
+
+    void SetCancelStream(std::function<void()> cancel_stream) {
+        bool cancel_now = false;
+        {
+            std::lock_guard lock(mutex_);
+            cancel_stream_ = std::move(cancel_stream);
+            cancel_now = cancelled();
+        }
+        if (cancel_now) {
+            Cancel();
+        }
+    }
+
+    void ClearCancelStream() {
+        std::lock_guard lock(mutex_);
+        cancel_stream_ = {};
+    }
+
+private:
+    std::atomic<bool> cancelled_{false};
+    std::mutex mutex_;
+    std::function<void()> cancel_stream_;
+};
+
+template<typename Handler>
+class UnaryCallCompletion
+    : public std::enable_shared_from_this<UnaryCallCompletion<Handler>> {
+public:
+    UnaryCallCompletion(
+            boost::asio::any_io_executor executor,
+            Handler handler)
+        : executor_(std::move(executor))
+        , handler_(std::move(handler))
+        , control_(std::make_shared<UnaryCallControl>())
+    {}
+
+    void Complete(UnaryResultRaw result) {
+        if (completed_.exchange(true)) {
+            return;
+        }
+        control_->ClearCancelStream();
+        boost::asio::post(
+            executor_,
+            [self = this->shared_from_this(),
+             result = std::move(result)]() mutable {
+                Handler handler = std::move(*self->handler_);
+                self->handler_.reset();
+                std::move(handler)(std::move(result));
+            });
+    }
+
+    void Cancel() {
+        control_->Cancel();
+        Complete(UnaryResultRaw{
+            Status{StatusCode::CANCELLED, "call cancelled"}});
+    }
+
+    const std::shared_ptr<UnaryCallControl>& control() const {
+        return control_;
+    }
+
+private:
+    boost::asio::any_io_executor executor_;
+    std::optional<Handler> handler_;
+    std::shared_ptr<UnaryCallControl> control_;
+    std::atomic<bool> completed_{false};
+};
 
 ChannelImpl::ChannelImpl(boost::asio::io_context& ioc,
                          std::string              host,
@@ -393,7 +481,8 @@ void ChannelImpl::DrainQueue(boost::system::error_code ec) {
     auto pending = std::move(pending_calls_);
     for (auto& p : pending)
         SubmitCall(std::move(p.path), p.ctx,
-                   std::move(p.request_bytes), std::move(p.completion));
+                   std::move(p.request_bytes), std::move(p.completion),
+                   std::move(p.control));
 
     auto generic_pending = std::move(pending_generic_calls_);
     for (auto& fn : generic_pending) fn();
@@ -423,22 +512,32 @@ Status ChannelImpl::ShutdownStatus() const {
 void ChannelImpl::SubmitCall(std::string                         path,
                               ClientContext*                      ctx,
                               std::string                         req_bytes,
-                              std::function<void(UnaryResultRaw)> completion) {
+                              std::function<void(UnaryResultRaw)> completion,
+                              std::shared_ptr<UnaryCallControl>   control) {
     boost::asio::dispatch(strand_,
         [self = shared_from_this(),
          path = std::move(path),
          ctx,
          req_bytes  = std::move(req_bytes),
-         completion = std::move(completion)]() mutable {
+         completion = std::move(completion),
+         control = std::move(control)]() mutable {
+            if (control && control->cancelled()) {
+                completion(UnaryResultRaw{
+                    Status{StatusCode::CANCELLED, "call cancelled"}});
+                return;
+            }
             if (self->state_ == ConnState::kShutdown) {
                 completion(UnaryResultRaw{self->ShutdownStatus()});
                 return;
             }
             if (self->state_ == ConnState::kIdle ||
                 self->state_ == ConnState::kConnecting) {
-                self->pending_calls_.push_back({std::move(path), ctx,
-                                                std::move(req_bytes),
-                                                std::move(completion)});
+                self->pending_calls_.push_back({
+                    std::move(path),
+                    ctx,
+                    std::move(req_bytes),
+                    std::move(completion),
+                    std::move(control)});
                 if (self->state_ == ConnState::kIdle) {
                     self->state_ = ConnState::kConnecting;
                     self->DoConnect();
@@ -509,6 +608,21 @@ void ChannelImpl::SubmitCall(std::string                         path,
             const auto stream_id =
                 static_cast<std::int32_t>(req->stream_id());
             self->active_calls_.emplace(stream_id, call);
+            if (control) {
+                control->SetCancelStream(
+                    [weak_self = std::weak_ptr<ChannelImpl>(self),
+                     call,
+                     req] {
+                        if (auto self = weak_self.lock()) {
+                            boost::asio::dispatch(
+                                self->strand_,
+                                [call, req] {
+                                    req->cancel(NGHTTP2_CANCEL);
+                                    call->Cancel();
+                                });
+                        }
+                    });
+            }
 
             // on_response: register sub-callbacks on the response immediately.
             // The response object is valid for the duration of this callback.
@@ -941,23 +1055,42 @@ boost::asio::awaitable<Status> Channel::Connect() {
         boost::asio::use_awaitable);
 }
 
-boost::asio::awaitable<internal::UnaryResultRaw>
+boost::asio::awaitable<UnaryResultRaw>
 Channel::UnaryCallRaw(std::string_view path,
                       ClientContext&   ctx,
                       std::string_view req_bytes)
 {
     return boost::asio::async_initiate<
         const boost::asio::use_awaitable_t<>&,
-        void(internal::UnaryResultRaw)>(
+        void(UnaryResultRaw)>(
         [impl = impl_, path_str = std::string(path),
          req_str = std::string(req_bytes), &ctx](auto handler) mutable {
+            auto executor =
+                boost::asio::get_associated_executor(handler);
+            auto coroutine_slot =
+                boost::asio::get_associated_cancellation_slot(handler);
+            auto completion = std::make_shared<
+                internal::UnaryCallCompletion<decltype(handler)>>(
+                    std::move(executor), std::move(handler));
+            std::weak_ptr weak_completion = completion;
+            const auto cancel = [weak_completion](
+                    boost::asio::cancellation_type) {
+                if (auto completion = weak_completion.lock()) {
+                    completion->Cancel();
+                }
+            };
+            ctx.cancellation_slot().assign(cancel);
+            if (coroutine_slot.is_connected()) {
+                coroutine_slot.assign(cancel);
+            }
             impl->SubmitCall(
                 std::move(path_str),
                 &ctx,
                 std::move(req_str),
-                [h = std::make_shared<decltype(handler)>(std::move(handler))](internal::UnaryResultRaw r) mutable {
-                    std::move(*h)(std::move(r));
-                });
+                [completion](UnaryResultRaw result) mutable {
+                    completion->Complete(std::move(result));
+                },
+                completion->control());
         },
         boost::asio::use_awaitable);
 }
