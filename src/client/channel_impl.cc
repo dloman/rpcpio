@@ -797,7 +797,11 @@ Channel::Channel(boost::asio::io_context& ioc,
           ioc, std::move(host), port, std::move(opts)))
 {}
 
-Channel::~Channel() = default;
+// The session callbacks keep ChannelImpl alive, so without an explicit shutdown
+// the connection would outlive the last Channel and keep its io_context busy.
+Channel::~Channel() {
+    if (impl_) impl_->Shutdown();
+}
 
 void Channel::Shutdown() {
     impl_->Shutdown();
