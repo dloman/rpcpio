@@ -45,7 +45,7 @@ struct RawClientWriterImpl {
     {}
 
     // Set by the call state after submit() returns.
-    std::shared_ptr<nghttp2::asio_http2::client::request> req_;
+    const nghttp2::asio_http2::client::request* req_{nullptr};
 
     std::deque<std::string> pending_;   // LPM-encoded frames to send
     std::size_t             offset_{0}; // byte offset into pending_.front()

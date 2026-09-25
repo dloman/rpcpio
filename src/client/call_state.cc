@@ -23,10 +23,11 @@ ClientCallState::ClientCallState(boost::asio::io_context& ioc,
 void ClientCallState::ArmTimer() {
     if (!ctx_ || !ctx_->has_deadline()) return;
 
-    auto dl = ctx_->deadline();
-    if (!dl) return;
-
-    timer_.expires_at(*dl);
+    const std::chrono::nanoseconds remaining = ctx_->deadline_from_now();
+    timer_.expires_after(
+        remaining > std::chrono::nanoseconds::zero()
+            ? remaining
+            : std::chrono::nanoseconds::zero());
     auto self = shared_from_this();
     timer_.async_wait([self, strand = strand_](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted) return;

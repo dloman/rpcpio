@@ -565,8 +565,7 @@ static ssize_t ClientWriterGenerator(
             *flags = NGHTTP2_DATA_FLAG_EOF;
             return 0;
         }
-        *flags = NGHTTP2_DATA_FLAG_DEFERRED;
-        return 0;
+        return NGHTTP2_ERR_DEFERRED;
     }
     auto& front = impl->pending_.front();
     const std::size_t remaining = front.size() - impl->offset_;

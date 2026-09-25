@@ -19,7 +19,7 @@ TEST(StreamMessageQueue, PushThenPop) {
         q.Push("hello");
         auto r = co_await q.Pop();
         EXPECT_TRUE(r.ok());
-        ASSERT_TRUE(r.data.has_value());
+        EXPECT_TRUE(r.data.has_value());
         EXPECT_EQ(*r.data, "hello");
         done = true;
     }, boost::asio::detached);
@@ -42,9 +42,9 @@ TEST(StreamMessageQueue, FifoOrdering) {
         auto r2 = co_await q.Pop();
         auto r3 = co_await q.Pop();
 
-        ASSERT_TRUE(r1.data.has_value()); EXPECT_EQ(*r1.data, "a");
-        ASSERT_TRUE(r2.data.has_value()); EXPECT_EQ(*r2.data, "b");
-        ASSERT_TRUE(r3.data.has_value()); EXPECT_EQ(*r3.data, "c");
+        EXPECT_TRUE(r1.data.has_value()); EXPECT_EQ(*r1.data, "a");
+        EXPECT_TRUE(r2.data.has_value()); EXPECT_EQ(*r2.data, "b");
+        EXPECT_TRUE(r3.data.has_value()); EXPECT_EQ(*r3.data, "c");
         done = true;
     }, boost::asio::detached);
 
@@ -99,7 +99,7 @@ TEST(StreamMessageQueue, DrainThenEos) {
 
         auto r1 = co_await q.Pop();
         EXPECT_TRUE(r1.ok());
-        ASSERT_TRUE(r1.data.has_value());
+        EXPECT_TRUE(r1.data.has_value());
         EXPECT_EQ(*r1.data, "msg");
 
         auto r2 = co_await q.Pop();
@@ -123,7 +123,7 @@ TEST(StreamMessageQueue, PopBeforePush) {
     boost::asio::co_spawn(ioc, [&]() -> boost::asio::awaitable<void> {
         auto r = co_await q.Pop();
         EXPECT_TRUE(r.ok());
-        ASSERT_TRUE(r.data.has_value());
+        EXPECT_TRUE(r.data.has_value());
         EXPECT_EQ(*r.data, "async");
         done = true;
     }, boost::asio::detached);
@@ -181,8 +181,8 @@ TEST(StreamMessageQueue, MultipleAsyncPops) {
     boost::asio::co_spawn(ioc, [&]() -> boost::asio::awaitable<void> {
         for (int i = 0; i < 3; ++i) {
             auto r = co_await q.Pop();
-            ASSERT_TRUE(r.ok());
-            ASSERT_TRUE(r.data.has_value());
+            EXPECT_TRUE(r.ok());
+            EXPECT_TRUE(r.data.has_value());
             received.push_back(*r.data);
         }
         auto eos = co_await q.Pop();
