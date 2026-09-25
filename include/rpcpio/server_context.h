@@ -28,13 +28,11 @@ public:
     // Untrusted HTTP/2 :authority pseudo-header (routing info, NOT authenticated identity).
     const std::string& authority() const noexcept { return authority_; }
 
-    // Authenticated peer identity, absent unless mTLS succeeded.
-    // For mTLS, this is the first URI SAN or DNS SAN from the verified client certificate.
+    // Authenticated peer identity from this connection's verified client
+    // certificate. This is the first URI SAN, otherwise the first DNS SAN.
+    // It is absent for h2c, unverified TLS, and certificates without either
+    // SAN type. The subject name and :authority are never identities.
     const std::optional<std::string>& peer_identity() const noexcept { return peer_identity_; }
-
-    // Deprecated: use authority() instead.
-    [[deprecated("use authority()")]]
-    const std::string& peer() const noexcept { return authority_; }
 
     bool has_deadline() const noexcept { return has_deadline_; }
     std::chrono::system_clock::time_point deadline() const noexcept { return deadline_; }

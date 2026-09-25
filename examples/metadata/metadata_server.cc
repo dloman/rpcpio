@@ -18,7 +18,7 @@ public:
         if (it != meta.end()) {
             std::cout << "Server received x-request-id: " << it->second << "\n";
         }
-        std::cout << "Server received peer: " << ctx.peer() << "\n";
+        std::cout << "Server received authority: " << ctx.authority() << "\n";
 
         // ── Attach metadata to the response ──────────────────────────────────
         // Initial metadata is sent before the response body.

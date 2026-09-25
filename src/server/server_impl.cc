@@ -8,10 +8,54 @@
 #include <boost/asio/ssl/context.hpp>
 #include <nghttp2/asio_http2_server.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include "src/protocol/metadata_codec.h"
 #include "src/protocol/status_map.h"
 
-static thread_local std::string tl_pending_peer_identity;
+namespace {
+
+std::string PeerIdentity(X509* certificate) {
+    if (certificate == nullptr) {
+        return {};
+    }
+
+    GENERAL_NAMES* names = static_cast<GENERAL_NAMES*>(
+        X509_get_ext_d2i(certificate, NID_subject_alt_name, nullptr, nullptr));
+    if (names == nullptr) {
+        return {};
+    }
+
+    std::string first_dns_name;
+    const int count = sk_GENERAL_NAME_num(names);
+    for (int i = 0; i < count; ++i) {
+        const GENERAL_NAME* name = sk_GENERAL_NAME_value(names, i);
+        const ASN1_IA5STRING* value = nullptr;
+        if (name->type == GEN_URI) {
+            value = name->d.uniformResourceIdentifier;
+        } else if (name->type == GEN_DNS && first_dns_name.empty()) {
+            value = name->d.dNSName;
+        }
+        if (value == nullptr) {
+            continue;
+        }
+
+        const auto* data = ASN1_STRING_get0_data(value);
+        const int length = ASN1_STRING_length(value);
+        std::string identity{
+            reinterpret_cast<const char*>(data),
+            static_cast<std::size_t>(length)};
+        if (name->type == GEN_URI) {
+            GENERAL_NAMES_free(names);
+            return identity;
+        }
+        first_dns_name = std::move(identity);
+    }
+
+    GENERAL_NAMES_free(names);
+    return first_dns_name;
+}
+
+} // namespace
 
 namespace rpcpio::internal {
 
@@ -75,7 +119,9 @@ rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
     boost::system::error_code ec;
 
     if (!opts_.server_cert_file.empty() && !opts_.use_h2c) {
-        boost::asio::ssl::context ssl_ctx(boost::asio::ssl::context::tls_server);
+        ssl_context_ = std::make_shared<boost::asio::ssl::context>(
+            boost::asio::ssl::context::tls_server);
+        auto& ssl_ctx = *ssl_context_;
 
         ssl_ctx.use_certificate_chain_file(opts_.server_cert_file, ec);
         if (ec) return Status{StatusCode::INVALID_ARGUMENT,
@@ -92,18 +138,6 @@ rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
                                   "CA cert file: " + ec.message()};
             ssl_ctx.set_verify_mode(boost::asio::ssl::verify_peer |
                                     boost::asio::ssl::verify_fail_if_no_peer_cert);
-            ssl_ctx.set_verify_callback(
-                [](bool preverified, boost::asio::ssl::verify_context& vctx) -> bool {
-                    if (preverified) {
-                        X509* cert = X509_STORE_CTX_get_current_cert(vctx.native_handle());
-                        if (cert) {
-                            char buf[256] = {};
-                            X509_NAME_oneline(X509_get_subject_name(cert), buf, sizeof(buf) - 1);
-                            tl_pending_peer_identity = buf;
-                        }
-                    }
-                    return preverified;
-                });
         }
 
         // ALPN h2
@@ -189,8 +223,8 @@ void ServerImpl::HandleRequest(
         return;
     }
 
-    // Extract mTLS peer identity (populated by the SSL verify callback, if any).
-    std::string peer_identity = std::exchange(tl_pending_peer_identity, {});
+    // The request borrows the certificate owned by its connection.
+    std::string peer_identity = PeerIdentity(req.tls_peer_certificate());
 
     // Look up handler: check all four RPC kind maps in order.
     {

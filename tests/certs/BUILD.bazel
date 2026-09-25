@@ -1,0 +1,5 @@
+filegroup(
+    name = "certs",
+    srcs = glob(["*"]),
+    visibility = ["//tests/unit:__pkg__"],
+)

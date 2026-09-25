@@ -10,6 +10,7 @@
 #include <vector>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/ssl/context.hpp>
 #include <nghttp2/asio_http2_server.h>
 #include "rpcpio/server.h"
 #include "rpcpio/server_context.h"
@@ -61,6 +62,8 @@ private:
     boost::asio::io_context&  ioc_;
     ServerOptions             opts_;
     nghttp2::asio_http2::server::http2 http2_;
+    // nghttp2-asio retains a reference for future accepted connections.
+    std::shared_ptr<boost::asio::ssl::context> ssl_context_;
 
     // One map per RPC kind.
     std::unordered_map<std::string, RawHandler>                handlers_;
