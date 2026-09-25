@@ -80,6 +80,10 @@ public:
                     }
                     payload_.clear();
                     payload_.reserve(payload_len_);
+                    if (payload_len_ == 0) {
+                        callback(payload_);
+                        header_bytes_ = 0;
+                    }
                 }
             } else {
                 // Accumulate payload bytes.

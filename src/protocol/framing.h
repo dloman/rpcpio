@@ -55,8 +55,9 @@ public:
     // only if the caller explicitly marks it as such via MarkEos().
     void Feed(std::string_view chunk);
 
-    // Signal that no more data will arrive.  If the message was not fully
-    // received, transitions to kError.
+    // Signal that no more data will arrive. A partial message transitions to
+    // kError; receiving no message leaves the decoder awaiting a header so
+    // the caller can report a missing-message error.
     void MarkEos();
 
     State state() const noexcept { return state_; }

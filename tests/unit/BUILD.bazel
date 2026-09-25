@@ -12,6 +12,18 @@ cc_test(
 )
 
 cc_test(
+    name = "empty_message_rpc_test",
+    srcs = ["empty_message_rpc_test.cc"],
+    copts = ["-std=c++20"],
+    deps = [
+        "//:rpcpio_runtime",
+        "@googletest//:gtest_main",
+        "@nghttp2-asio//:nghttp2_asio",
+        "@protobuf//:protobuf",
+    ],
+)
+
+cc_test(
     name = "peer_identity_test",
     srcs = ["peer_identity_test.cc"],
     copts = ["-std=c++20"],

@@ -127,6 +127,7 @@ void FrameDecoder::Reset() {
 
 void FrameDecoder::MarkEos() {
     if (state_ == State::kError || state_ == State::kDone) return;
+    if (state_ == State::kAwaitingHeader && header_bytes_ == 0) return;
     // Incomplete header or payload at EOS is an error.
     SetError("stream ended with incomplete message");
 }

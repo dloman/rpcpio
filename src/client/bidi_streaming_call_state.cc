@@ -149,6 +149,11 @@ void BidiStreamingClientCallState::Attach(
                         }
                         self->payload_buf_.clear();
                         self->payload_buf_.reserve(self->payload_len_);
+                        if (self->payload_len_ == 0) {
+                            self->reader_impl_->msg_queue_.Push({});
+                            self->hdr_done_ = false;
+                            self->hdr_bytes_ = 0;
+                        }
                     }
                 } else {
                     const std::size_t need = self->payload_len_ - self->payload_buf_.size();
