@@ -39,6 +39,8 @@ cc_library(
     srcs = [":grpc_testing_rpcpio_gen"],
     hdrs = ["grpc_testing.rpcpio.pb.h"],
     copts = ["-std=c++20"],
+    # Generated code includes its own headers by bare filename.
+    includes = ["."],
     deps = [
         ":grpc_testing_cc_proto",
         "//:rpcpio_runtime",

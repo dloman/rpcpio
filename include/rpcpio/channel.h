@@ -136,6 +136,14 @@ public:
     Channel(const Channel&)            = delete;
     Channel& operator=(const Channel&) = delete;
 
+    // Execute one unary RPC on serialized protobuf bytes, for callers without
+    // generated message types (proxies, code generators, language bindings).
+    // |ctx| must outlive the returned awaitable.
+    boost::asio::awaitable<internal::UnaryResultRaw>
+    UnaryCallRaw(std::string_view path,
+                 ClientContext&   ctx,
+                 std::string_view request_bytes);
+
 private:
     // Pair of raw handles returned by BidiStreamingCallRaw.
     struct RawBidiHandles {
@@ -143,11 +151,7 @@ private:
         internal::RawClientWriter writer;
     };
 
-    // Type-erased network calls; implemented in channel_impl.cc.
-    boost::asio::awaitable<internal::UnaryResultRaw>
-    UnaryCallRaw(std::string_view path,
-                 ClientContext&   ctx,
-                 std::string_view request_bytes);
+    // Type-erased streaming calls; implemented in channel_impl.cc.
 
     boost::asio::awaitable<internal::RawClientReader>
     ServerStreamingCallRaw(std::string_view path,
