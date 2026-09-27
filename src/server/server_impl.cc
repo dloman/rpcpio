@@ -5,6 +5,8 @@
 #include "bidi_streaming_call_state.h"
 
 #include <algorithm>
+#include <exception>
+#include <system_error>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/ssl/context.hpp>
@@ -99,24 +101,109 @@ void ServerImpl::RegisterBidiRaw(std::string_view path,
     bidi_handlers_[std::string(path)] = std::move(handler);
 }
 
-std::uint16_t ServerImpl::ResolvePort(std::uint16_t port) {
-    if (port != 0) return port;
+rpcpio::Status ServerImpl::ResolvePort(
+    std::uint16_t port, std::uint16_t* resolved_port) {
+    if (port != 0) {
+        *resolved_port = port;
+        return {};
+    }
+
     // Briefly bind an acceptor on port 0 so the OS picks an ephemeral port.
     // There is a small TOCTOU window between close() and listen_and_serve();
     // this is acceptable for test environments.
     boost::asio::ip::tcp::acceptor tmp(ioc_);
-    tmp.open(boost::asio::ip::tcp::v4());
-    tmp.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
-    tmp.bind(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0));
-    const std::uint16_t chosen = tmp.local_endpoint().port();
-    tmp.close();
-    return chosen;
+    boost::system::error_code error;
+    tmp.open(boost::asio::ip::tcp::v4(), error);
+    if (error) {
+        return Status{
+            StatusCode::UNAVAILABLE,
+            "ephemeral port socket open failed: " + error.message()};
+    }
+    tmp.set_option(
+        boost::asio::ip::tcp::acceptor::reuse_address(true), error);
+    if (error) {
+        return Status{
+            StatusCode::UNAVAILABLE,
+            "ephemeral port socket configuration failed: " + error.message()};
+    }
+    tmp.bind(
+        boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 0),
+        error);
+    if (error) {
+        return Status{
+            StatusCode::UNAVAILABLE,
+            "ephemeral port bind failed: " + error.message()};
+    }
+    const auto endpoint = tmp.local_endpoint(error);
+    if (error) {
+        return Status{
+            StatusCode::UNAVAILABLE,
+            "ephemeral port lookup failed: " + error.message()};
+    }
+    tmp.close(error);
+    if (error) {
+        return Status{
+            StatusCode::UNAVAILABLE,
+            "ephemeral port socket close failed: " + error.message()};
+    }
+    *resolved_port = endpoint.port();
+    return {};
 }
 
-rpcpio::Status ServerImpl::Start(std::string host, std::uint16_t port) {
-    if (started_.exchange(true))
-        return Status{StatusCode::FAILED_PRECONDITION, "Server::Start called more than once"};
-    port = ResolvePort(port);
+void ServerImpl::CleanupFailedStart() noexcept {
+    try {
+        StopTransport();
+    } catch (...) {
+    }
+    try {
+        Wait();
+    } catch (...) {
+    }
+    ssl_context_.reset();
+}
+
+rpcpio::Status ServerImpl::Start(
+    std::string host, std::uint16_t port) noexcept {
+    if (started_.exchange(true)) {
+        return Status{
+            StatusCode::FAILED_PRECONDITION,
+            "Server::Start called more than once"};
+    }
+    try {
+        Status status = StartImpl(std::move(host), port);
+        if (!status.ok()) {
+            CleanupFailedStart();
+        }
+        return status;
+    } catch (const boost::system::system_error& error) {
+        CleanupFailedStart();
+        return Status{
+            StatusCode::UNAVAILABLE,
+            "server startup failed: " + std::string(error.what())};
+    } catch (const std::system_error& error) {
+        CleanupFailedStart();
+        return Status{
+            StatusCode::UNAVAILABLE,
+            "server startup failed: " + std::string(error.what())};
+    } catch (const std::exception& error) {
+        CleanupFailedStart();
+        return Status{
+            StatusCode::INTERNAL,
+            "server startup failed: " + std::string(error.what())};
+    } catch (...) {
+        CleanupFailedStart();
+        return Status{
+            StatusCode::UNKNOWN,
+            "server startup failed with an unknown error"};
+    }
+}
+
+rpcpio::Status ServerImpl::StartImpl(
+    std::string host, std::uint16_t port) {
+    Status port_status = ResolvePort(port, &port);
+    if (!port_status.ok()) {
+        return port_status;
+    }
     bound_port_ = port;
     auto self = this;
 
@@ -432,7 +519,8 @@ void Server::RegisterBidiRaw(std::string_view path,
     impl_->RegisterBidiRaw(path, std::move(handler));
 }
 
-rpcpio::Status Server::Start(std::string host, std::uint16_t port) {
+rpcpio::Status Server::Start(
+    std::string host, std::uint16_t port) noexcept {
     return impl_->Start(std::move(host), port);
 }
 

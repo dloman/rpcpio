@@ -45,7 +45,7 @@ public:
 
     // Bind and start accepting connections. Returns non-OK on port conflict or
     // TLS configuration errors; never throws. Pass port=0 for ephemeral.
-    rpcpio::Status Start(std::string host, std::uint16_t port);
+    rpcpio::Status Start(std::string host, std::uint16_t port) noexcept;
 
     // Returns the port the server is actually listening on.
     // Valid only after a successful Start() call.
@@ -63,9 +63,11 @@ private:
     void TrackCall(const std::shared_ptr<ServerCallStateBase>& call);
     void FinishShutdown(std::chrono::steady_clock::time_point deadline);
     void StopTransport();
+    void CleanupFailedStart() noexcept;
+    rpcpio::Status StartImpl(std::string host, std::uint16_t port);
 
     // Resolve an ephemeral port (port == 0) by briefly binding a TCP acceptor.
-    std::uint16_t ResolvePort(std::uint16_t port);
+    rpcpio::Status ResolvePort(std::uint16_t port, std::uint16_t* resolved_port);
 
     std::unique_ptr<boost::asio::io_context> owned_ioc_;
     boost::asio::io_context&  ioc_;

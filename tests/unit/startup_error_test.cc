@@ -8,6 +8,13 @@
 #include "rpcpio/server.h"
 #include "rpcpio/status.h"
 
+#include <string>
+#include <utility>
+
+static_assert(noexcept(
+    std::declval<rpcpio::Server&>().Start(
+        std::declval<std::string>(), std::declval<std::uint16_t>())));
+
 TEST(StartupError, OccupiedPortReturnsUnavailableNoThrow) {
     boost::asio::io_context ioc;
 
