@@ -170,7 +170,7 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
                 const std::size_t max_size = self->ctx_
                     ? self->ctx_->max_receive_message_size()
                     : 4 * 1024 * 1024;
-                std::string decompressed;
+                std::vector<char> decompressed;
                 if (!protocol::Decompress(*self->response_encoding_,
                                           raw_payload, decompressed, max_size)) {
                     self->Complete(UnaryResultRaw{Status{
@@ -179,7 +179,7 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
                 }
                 self->result_.response_bytes = std::move(decompressed);
             } else {
-                self->result_.response_bytes = std::string(raw_payload);
+                self->result_.response_bytes = self->decoder_.TakePayload();
             }
 
             self->result_.has_response = self->decoder_.done();

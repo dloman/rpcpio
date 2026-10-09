@@ -511,7 +511,7 @@ Status ChannelImpl::ShutdownStatus() const {
 
 void ChannelImpl::SubmitCall(std::string                         path,
                               ClientContext*                      ctx,
-                              std::string                         req_bytes,
+                              std::vector<char>                   req_bytes,
                               std::function<void(UnaryResultRaw)> completion,
                               std::shared_ptr<UnaryCallControl>   control) {
     boost::asio::dispatch(strand_,
@@ -584,7 +584,10 @@ void ChannelImpl::SubmitCall(std::string                         path,
 
             // Encode gRPC LPM frame.
             std::string frame;
-            if (!protocol::EncodeFrame(0, req_bytes, frame)) {
+            if (!protocol::EncodeFrame(
+                    0,
+                    std::string_view(req_bytes.data(), req_bytes.size()),
+                    frame)) {
                 completion(UnaryResultRaw{
                     Status{StatusCode::RESOURCE_EXHAUSTED, "request too large"}});
                 return;
@@ -1126,13 +1129,13 @@ boost::asio::awaitable<Status> Channel::Connect() {
 boost::asio::awaitable<UnaryResultRaw>
 Channel::UnaryCallRaw(std::string_view path,
                       ClientContext&   ctx,
-                      std::string_view req_bytes)
+                      std::vector<char> req_bytes)
 {
     return boost::asio::async_initiate<
         const boost::asio::use_awaitable_t<>&,
         void(UnaryResultRaw)>(
         [impl = impl_, path_str = std::string(path),
-         req_str = std::string(req_bytes), &ctx](auto handler) mutable {
+         req_bytes = std::move(req_bytes), &ctx](auto handler) mutable {
             auto executor =
                 boost::asio::get_associated_executor(handler);
             auto coroutine_slot =
@@ -1154,7 +1157,7 @@ Channel::UnaryCallRaw(std::string_view path,
             impl->SubmitCall(
                 std::move(path_str),
                 &ctx,
-                std::move(req_str),
+                std::move(req_bytes),
                 [completion](UnaryResultRaw result) mutable {
                     completion->Complete(std::move(result));
                 },

@@ -58,8 +58,8 @@ void RunInterleavedIdentityTest(std::uint32_t num_threads) {
     server.RegisterUnaryRaw(
         kEchoAuthPath,
         [&](rpcpio::ServerContext& context,
-            std::string_view,
-            std::string&) -> boost::asio::awaitable<rpcpio::Status> {
+            std::vector<char>,
+            std::vector<char>&) -> boost::asio::awaitable<rpcpio::Status> {
             std::lock_guard lock(observed_mutex);
             observed.push_back(context.peer_identity());
             co_return rpcpio::Status{};
@@ -88,7 +88,7 @@ void RunInterleavedIdentityTest(std::uint32_t num_threads) {
                 for (const auto& channel : {uri_channel, dns_channel}) {
                     rpcpio::ClientContext context;
                     auto result =
-                        co_await channel->UnaryCallRaw(kEchoAuthPath, context, "");
+                        co_await channel->UnaryCallRaw(kEchoAuthPath, context, {});
                     statuses.push_back(std::move(result.status));
                 }
             }
@@ -133,8 +133,8 @@ TEST(PeerIdentity, H2cHasAuthorityButNoIdentity) {
     server.RegisterUnaryRaw(
         kEchoAuthPath,
         [&](rpcpio::ServerContext& context,
-            std::string_view,
-            std::string&) -> boost::asio::awaitable<rpcpio::Status> {
+            std::vector<char>,
+            std::vector<char>&) -> boost::asio::awaitable<rpcpio::Status> {
             captured_authority = context.authority();
             captured_identity = context.peer_identity();
             co_return rpcpio::Status{};
@@ -152,7 +152,7 @@ TEST(PeerIdentity, H2cHasAuthorityButNoIdentity) {
         client_ioc,
         [channel]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext context;
-            co_await channel->UnaryCallRaw(kEchoAuthPath, context, "");
+            co_await channel->UnaryCallRaw(kEchoAuthPath, context, {});
         },
         [channel](std::exception_ptr) { channel->Shutdown(); });
 
@@ -181,8 +181,8 @@ TEST(PeerIdentity, VerifiedCertificateWithoutSanHasNoIdentity) {
     server.RegisterUnaryRaw(
         kEchoAuthPath,
         [&](rpcpio::ServerContext& context,
-            std::string_view,
-            std::string&) -> boost::asio::awaitable<rpcpio::Status> {
+            std::vector<char>,
+            std::vector<char>&) -> boost::asio::awaitable<rpcpio::Status> {
             captured_identity = context.peer_identity();
             co_return rpcpio::Status{};
         });
@@ -200,7 +200,7 @@ TEST(PeerIdentity, VerifiedCertificateWithoutSanHasNoIdentity) {
         [&]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext context;
             auto result =
-                co_await channel->UnaryCallRaw(kEchoAuthPath, context, "");
+                co_await channel->UnaryCallRaw(kEchoAuthPath, context, {});
             status = std::move(result.status);
         },
         [channel](std::exception_ptr) { channel->Shutdown(); });
@@ -221,8 +221,8 @@ TEST(PeerIdentity, UnverifiedClientNeverReachesHandler) {
     server.RegisterUnaryRaw(
         kEchoAuthPath,
         [&](rpcpio::ServerContext&,
-            std::string_view,
-            std::string&) -> boost::asio::awaitable<rpcpio::Status> {
+            std::vector<char>,
+            std::vector<char>&) -> boost::asio::awaitable<rpcpio::Status> {
             ++handler_calls;
             co_return rpcpio::Status{};
         });
@@ -244,7 +244,7 @@ TEST(PeerIdentity, UnverifiedClientNeverReachesHandler) {
         [&]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext context;
             auto result =
-                co_await channel->UnaryCallRaw(kEchoAuthPath, context, "");
+                co_await channel->UnaryCallRaw(kEchoAuthPath, context, {});
             status = std::move(result.status);
         },
         [channel](std::exception_ptr) { channel->Shutdown(); });

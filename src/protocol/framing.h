@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rpcpio::protocol {
@@ -65,7 +66,12 @@ public:
     bool  error() const noexcept { return state_ == State::kError; }
 
     // Valid only when state() == kDone.
-    const std::string& payload()       const noexcept { return payload_; }
+    std::string_view payload() const noexcept {
+        return std::string_view(payload_.data(), payload_.size());
+    }
+    std::vector<char> TakePayload() noexcept {
+        return std::move(payload_);
+    }
     std::uint8_t       compress_flag() const noexcept { return compress_flag_; }
 
     // Description of the error (valid when state() == kError).
@@ -93,7 +99,7 @@ private:
     // Payload accumulation
     std::uint8_t  compress_flag_{0};
     std::uint32_t payload_len_{0};
-    std::string   payload_;
+    std::vector<char> payload_;
 
     std::string   error_message_;
 };

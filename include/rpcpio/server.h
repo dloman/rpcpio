@@ -3,8 +3,10 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
+#include <vector>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <google/protobuf/message.h>
@@ -60,8 +62,8 @@ public:
             method.path,
             [h = std::move(handler)](
                 ServerContext&     ctx,
-                std::string_view   req_bytes,
-                std::string&       resp_bytes
+                std::vector<char>  req_bytes,
+                std::vector<char>& resp_bytes
             ) -> boost::asio::awaitable<Status> {
                 // Deserialize request.
                 Req req;
@@ -76,7 +78,16 @@ public:
                 if (!result.ok()) co_return result.status();
 
                 // Serialize response.
-                if (!result->SerializeToString(&resp_bytes)) {
+                const std::size_t response_size = result->ByteSizeLong();
+                if (response_size >
+                    static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+                    co_return Status{
+                        StatusCode::RESOURCE_EXHAUSTED,
+                        "response serialization exceeds int range"};
+                }
+                resp_bytes.resize(response_size);
+                if (!result->SerializeToArray(
+                        resp_bytes.data(), static_cast<int>(response_size))) {
                     co_return Status{StatusCode::INTERNAL,
                                      "failed to serialize response"};
                 }
@@ -171,7 +182,7 @@ public:
     // Must be called before Start().
     using RawHandler = std::function<
         boost::asio::awaitable<Status>(
-            ServerContext&, std::string_view, std::string&)>;
+            ServerContext&, std::vector<char>, std::vector<char>&)>;
 
     using RawServerStreamingHandler = std::function<
         boost::asio::awaitable<Status>(

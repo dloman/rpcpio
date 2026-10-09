@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
@@ -20,7 +21,7 @@ namespace rpcpio::internal {
 // Type-erased RPC handler: receives raw request bytes, fills raw response bytes.
 using RawHandler = std::function<
     boost::asio::awaitable<Status>(
-        ServerContext&, std::string_view, std::string&)>;
+        ServerContext&, std::vector<char>, std::vector<char>&)>;
 
 // Manages one inbound unary call.  Created for each HTTP/2 stream that passes
 // basic gRPC validation.  Lifetime is tied to the nghttp2-asio request/response

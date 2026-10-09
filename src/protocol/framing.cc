@@ -92,7 +92,8 @@ void FrameDecoder::Feed(std::string_view chunk) {
             case State::kAwaitingPayload: {
                 std::size_t need = payload_len_ - payload_.size();
                 std::size_t take = std::min(need, chunk.size());
-                payload_.append(chunk.data(), take);
+                payload_.insert(
+                    payload_.end(), chunk.data(), chunk.data() + take);
                 chunk.remove_prefix(take);
                 if (payload_.size() == payload_len_) {
                     has_message_ = true;

@@ -94,7 +94,7 @@ TEST(Shutdown, CallAfterShutdownReturnsCancelled) {
     boost::asio::co_spawn(ioc,
         [ch, &result, &done]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext ctx;
-            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, "");
+            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, {});
             result = raw.status;
             done   = true;
         },
@@ -138,7 +138,7 @@ TEST(Shutdown, DuringConnect) {
     boost::asio::co_spawn(ioc,
         [ch, &result, &done]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext ctx;
-            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, "");
+            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, {});
             result = raw.status;
             done = true;
         },
@@ -162,7 +162,7 @@ TEST(Shutdown, DuringConnect) {
         ioc,
         [ch, &later_done]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext ctx;
-            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, "");
+            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, {});
             EXPECT_EQ(raw.status.code(), rpcpio::StatusCode::CANCELLED);
             later_done = true;
         },
@@ -192,7 +192,7 @@ TEST(Shutdown, AfterIocStop) {
         ioc,
         [ch, &result, &done]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext ctx;
-            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, "");
+            auto raw = co_await ch->UnaryCallRaw(kPath, ctx, {});
             result = raw.status;
             done = true;
         },

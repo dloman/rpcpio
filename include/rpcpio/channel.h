@@ -2,9 +2,11 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
@@ -79,16 +81,20 @@ public:
     UnaryCall(const UnaryMethod<Req, Resp>& method,
               ClientContext&                ctx,
               const Req&                    req) {
-        // Serialize request.
-        std::string req_bytes;
-        if (!req.SerializeToString(&req_bytes)) {
+        const std::size_t request_size = req.ByteSizeLong();
+        if (request_size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+            co_return UnaryResult<Resp>{
+                Status{StatusCode::RESOURCE_EXHAUSTED, "request serialization exceeds int range"}};
+        }
+        std::vector<char> req_bytes(request_size);
+        if (!req.SerializeToArray(req_bytes.data(), static_cast<int>(request_size))) {
             co_return UnaryResult<Resp>{
                 Status{StatusCode::INTERNAL, "request serialization failed"}};
         }
 
         // Type-erased wire call.
         UnaryResultRaw raw =
-            co_await UnaryCallRaw(method.path, ctx, req_bytes);
+            co_await UnaryCallRaw(method.path, ctx, std::move(req_bytes));
 
         // Assemble typed result.
         UnaryResult<Resp> result;
@@ -98,7 +104,9 @@ public:
 
         if (raw.status.ok() && raw.has_response) {
             result.response.emplace();
-            if (!result.response->ParseFromString(raw.response_bytes)) {
+            if (!result.response->ParseFromArray(
+                    raw.response_bytes.data(),
+                    static_cast<int>(raw.response_bytes.size()))) {
                 result.status = Status{StatusCode::INTERNAL,
                                        "response deserialization failed"};
                 result.response.reset();
@@ -157,7 +165,7 @@ public:
     boost::asio::awaitable<UnaryResultRaw>
     UnaryCallRaw(std::string_view path,
                  ClientContext&   ctx,
-                 std::string_view request_bytes);
+                 std::vector<char> request_bytes);
 
     // Raw streaming counterparts of the typed calls above. Their awaitables
     // produce stream handles; cancellation after that point is reported by

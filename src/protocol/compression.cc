@@ -77,12 +77,12 @@ bool Compress(Encoding enc, std::string_view src, std::string& out) {
 
 bool Decompress(Encoding enc,
                 std::string_view src,
-                std::string& out,
+                std::vector<char>& out,
                 std::size_t  max_output_size)
 {
     if (enc == Encoding::kIdentity) {
         if (src.size() > max_output_size) return false;
-        out.assign(src.data(), src.size());
+        out.assign(src.begin(), src.end());
         return true;
     }
 #ifdef RPCPIO_ENABLE_GZIP
