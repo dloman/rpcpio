@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
@@ -87,8 +88,8 @@ void TestClientCloseCancelsHandler(RpcKind kind) {
     server.RegisterUnaryRaw(
         kUnaryCancelPath,
         [&](rpcpio::ServerContext& context,
-            std::string_view,
-            std::string&) -> boost::asio::awaitable<rpcpio::Status> {
+            std::vector<char>,
+            std::vector<char>&) -> boost::asio::awaitable<rpcpio::Status> {
             co_return co_await WaitForCancellation(
                 context, started, cancelled);
         });
@@ -137,7 +138,7 @@ void TestClientCloseCancelsHandler(RpcKind kind) {
             switch (kind) {
                 case RpcKind::kUnary:
                     co_await channel->UnaryCallRaw(
-                        path, context, "");
+                        path, context, {});
                     break;
                 case RpcKind::kServerStreaming: {
                     auto reader = co_await channel->ServerStreamingCallRaw(
@@ -244,8 +245,8 @@ TEST(ServerShutdown, HandlerCanShutdownAndLateResultIsDropped) {
     server.RegisterUnaryRaw(
         kShutdownPath,
         [&](rpcpio::ServerContext& context,
-            std::string_view,
-            std::string&) -> boost::asio::awaitable<rpcpio::Status> {
+            std::vector<char>,
+            std::vector<char>&) -> boost::asio::awaitable<rpcpio::Status> {
             context.cancellation_slot().assign(
                 [&](boost::asio::cancellation_type) {
                     cancellation_seen = true;
@@ -281,7 +282,7 @@ TEST(ServerShutdown, HandlerCanShutdownAndLateResultIsDropped) {
         [&]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext context;
             auto result =
-                co_await channel->UnaryCallRaw(kShutdownPath, context, "");
+                co_await channel->UnaryCallRaw(kShutdownPath, context, {});
             call_status = std::move(result.status);
         },
         [&](std::exception_ptr exception) {

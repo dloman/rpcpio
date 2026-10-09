@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <atomic>
 #include <chrono>
+#include <vector>
 #include <gtest/gtest.h>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -36,8 +37,8 @@ static rpcpio::Status RunOnce(std::size_t limit, std::size_t resp_size) {
     rpcpio::Server server(server_ioc, opts);
     server.RegisterUnaryRaw(kSizePath,
         [resp_size](rpcpio::ServerContext&,
-                    std::string_view,
-                    std::string& out) -> boost::asio::awaitable<rpcpio::Status> {
+                    std::vector<char>,
+                    std::vector<char>& out) -> boost::asio::awaitable<rpcpio::Status> {
             out.assign(resp_size, 'x');
             co_return rpcpio::Status{};
         });
@@ -57,7 +58,7 @@ static rpcpio::Status RunOnce(std::size_t limit, std::size_t resp_size) {
     boost::asio::co_spawn(client_ioc,
         [ch, &result]() -> boost::asio::awaitable<void> {
             rpcpio::ClientContext ctx;
-            auto raw = co_await ch->UnaryCallRaw(kSizePath, ctx, "");
+            auto raw = co_await ch->UnaryCallRaw(kSizePath, ctx, {});
             result = raw.status;
             ch->Shutdown();
         },
@@ -357,8 +358,8 @@ static rpcpio::Status RunResponseRace(
         kUnaryRacePath,
         [wait_to_respond](
                 rpcpio::ServerContext&,
-                std::string_view,
-                std::string& response)
+                std::vector<char>,
+                std::vector<char>& response)
                 -> boost::asio::awaitable<rpcpio::Status> {
             co_await wait_to_respond();
             response.assign(kLimit + 1, 'x');
@@ -424,7 +425,7 @@ static rpcpio::Status RunResponseRace(
         [&, context]() -> boost::asio::awaitable<void> {
             if (kind == RaceRpcKind::kUnary) {
                 auto response = co_await channel->UnaryCallRaw(
-                    kUnaryRacePath, *context, "");
+                    kUnaryRacePath, *context, {});
                 result = response.status;
             } else if (kind == RaceRpcKind::kServerStreaming) {
                 auto reader = co_await channel->ServerStreamingCallRaw(

@@ -157,7 +157,7 @@ void ServerCallState::OnRequestEnd() {
         return;
     }
 
-    std::string req_bytes;
+    std::vector<char> req_bytes;
     if (request_encoding_ &&
         *request_encoding_ != protocol::Encoding::kIdentity &&
         decoder_.compress_flag() != 0) {
@@ -168,7 +168,7 @@ void ServerCallState::OnRequestEnd() {
             return;
         }
     } else {
-        req_bytes = std::string{decoder_.payload()};
+        req_bytes = decoder_.TakePayload();
     }
 
     auto self = shared_from_this();
@@ -178,17 +178,20 @@ void ServerCallState::OnRequestEnd() {
         executor_,
         [self, req_bytes = std::move(req_bytes)]()
                 -> boost::asio::awaitable<void> {
-            std::string resp_bytes;
+            std::vector<char> resp_bytes;
             Status status;
             try {
-                status = co_await self->handler_(self->ctx_, req_bytes, resp_bytes);
+                status = co_await self->handler_(
+                    self->ctx_, std::move(req_bytes), resp_bytes);
             } catch (...) {
                 status = Status{StatusCode::INTERNAL, "handler threw exception"};
             }
 
             if (!self->responded_) {
                 self->timer_.cancel();
-                self->SendResponse(status, resp_bytes,
+                self->SendResponse(
+                                   status,
+                                   std::string_view(resp_bytes.data(), resp_bytes.size()),
                                    self->ctx_.initial_metadata(),
                                    self->ctx_.trailing_metadata());
             }

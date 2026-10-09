@@ -112,7 +112,7 @@ TEST(ClientTlsConfiguration, ValidationAndCallsReturnStickyError) {
                 for (int i = 0; i < 2; ++i) {
                     rpcpio::ClientContext context;
                     auto result = co_await channel->UnaryCallRaw(
-                        kPath, context, "");
+                        kPath, context, {});
                     EXPECT_EQ(result.status, validation);
                 }
             },

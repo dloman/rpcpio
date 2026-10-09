@@ -9,6 +9,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -55,7 +56,7 @@ public:
     // call until connection completes (or fails).
     void SubmitCall(std::string                              path,
                     ClientContext*                           ctx,
-                    std::string                              request_bytes,
+                    std::vector<char>                        request_bytes,
                     std::function<void(UnaryResultRaw)>      completion,
                     std::shared_ptr<UnaryCallControl>        control = {});
 
@@ -113,7 +114,7 @@ private:
     struct PendingCall {
         std::string                        path;
         ClientContext*                     ctx;
-        std::string                        request_bytes;
+        std::vector<char>                  request_bytes;
         std::function<void(UnaryResultRaw)> completion;
         std::shared_ptr<UnaryCallControl>   control;
     };

@@ -114,7 +114,7 @@ void SpawnRawCall(
         [&]() -> boost::asio::awaitable<void> {
             observation.started = true;
             auto result =
-                co_await channel->UnaryCallRaw(kPath, context, "");
+                co_await channel->UnaryCallRaw(kPath, context, {});
             observation.status = std::move(result.status);
             observation.completion_thread = std::this_thread::get_id();
             ++observation.completions;
@@ -228,8 +228,8 @@ void RunInFlight(CancelSource source) {
     server.RegisterUnaryRaw(
         kPath,
         [&](rpcpio::ServerContext& server_context,
-            std::string_view,
-            std::string&) -> boost::asio::awaitable<rpcpio::Status> {
+            std::vector<char>,
+            std::vector<char>&) -> boost::asio::awaitable<rpcpio::Status> {
             handler_started = true;
             auto executor = co_await boost::asio::this_coro::executor;
             boost::asio::steady_timer timer(executor);

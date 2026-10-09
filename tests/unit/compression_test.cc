@@ -1,3 +1,5 @@
+#include <vector>
+
 #include <gtest/gtest.h>
 #include "src/protocol/compression.h"
 
@@ -9,9 +11,9 @@ TEST(Compression, IdentityRoundtrip) {
     ASSERT_TRUE(Compress(Encoding::kIdentity, src, out));
     EXPECT_EQ(out, src);
 
-    std::string dec;
+    std::vector<char> dec;
     ASSERT_TRUE(Decompress(Encoding::kIdentity, out, dec));
-    EXPECT_EQ(dec, src);
+    EXPECT_EQ(dec, std::vector<char>(src.begin(), src.end()));
 }
 
 TEST(Compression, IdentityEmptyInput) {
@@ -23,7 +25,7 @@ TEST(Compression, IdentityEmptyInput) {
 TEST(Compression, IdentityDecompressionBomb) {
     // Large input should be rejected when it exceeds max_output_size.
     std::string big(100, 'x');
-    std::string out;
+    std::vector<char> out;
     EXPECT_FALSE(Decompress(Encoding::kIdentity, big, out, 50));
 }
 
@@ -55,9 +57,9 @@ TEST(Compression, GzipRoundtrip) {
     ASSERT_TRUE(Compress(Encoding::kGzip, src, compressed));
     EXPECT_LT(compressed.size(), src.size());  // should be smaller
 
-    std::string decompressed;
+    std::vector<char> decompressed;
     ASSERT_TRUE(Decompress(Encoding::kGzip, compressed, decompressed));
-    EXPECT_EQ(decompressed, src);
+    EXPECT_EQ(decompressed, std::vector<char>(src.begin(), src.end()));
 }
 
 TEST(Compression, GzipDecompressionBomb) {
@@ -66,7 +68,7 @@ TEST(Compression, GzipDecompressionBomb) {
     std::string compressed;
     ASSERT_TRUE(Compress(Encoding::kGzip, src, compressed));
 
-    std::string out;
+    std::vector<char> out;
     // Decompress with a tiny limit should fail.
     EXPECT_FALSE(Decompress(Encoding::kGzip, compressed, out, 1024));
 }

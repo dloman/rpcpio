@@ -43,7 +43,7 @@ bool Compress(Encoding enc, std::string_view src, std::string& out);
 // Returns false on error (bad stream, output exceeds limit, etc.).
 bool Decompress(Encoding enc,
                 std::string_view src,
-                std::string& out,
+                std::vector<char>& out,
                 std::size_t  max_output_size = 4 * 1024 * 1024);
 
 } // namespace rpcpio::protocol

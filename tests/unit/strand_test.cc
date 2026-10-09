@@ -43,9 +43,9 @@ TEST(Strand, ConcurrentCallsAllComplete) {
     rpcpio::Server server(server_ioc, sopts);
     server.RegisterUnaryRaw(kStrandPath,
         [](rpcpio::ServerContext&,
-           std::string_view req,
-           std::string& resp) -> boost::asio::awaitable<rpcpio::Status> {
-            resp = std::string(req);  // echo
+           std::vector<char> req,
+           std::vector<char>& resp) -> boost::asio::awaitable<rpcpio::Status> {
+            resp = std::move(req);
             co_return rpcpio::Status{};
         });
 
@@ -67,8 +67,9 @@ TEST(Strand, ConcurrentCallsAllComplete) {
             [ch, i, &ok_count, &done_count]()
                     -> boost::asio::awaitable<void> {
                 rpcpio::ClientContext ctx;
-                std::string payload(8, static_cast<char>('a' + (i % 26)));
-                auto raw = co_await ch->UnaryCallRaw(kStrandPath, ctx, payload);
+                std::vector<char> payload(8, static_cast<char>('a' + (i % 26)));
+                auto raw =
+                    co_await ch->UnaryCallRaw(kStrandPath, ctx, std::move(payload));
                 if (raw.status.ok()) ++ok_count;
                 if (++done_count == kCalls) ch->Shutdown();
             },
@@ -101,9 +102,9 @@ TEST(Strand, ThousandMixedCallsCompleteOnceDuringShutdown) {
     server.RegisterUnaryRaw(
         kStrandPath,
         [](rpcpio::ServerContext&,
-           std::string_view request,
-           std::string& response) -> boost::asio::awaitable<rpcpio::Status> {
-            response = request;
+           std::vector<char> request,
+           std::vector<char>& response) -> boost::asio::awaitable<rpcpio::Status> {
+            response = std::move(request);
             co_return rpcpio::Status{};
         });
     server.RegisterServerStreamingRaw(
@@ -174,7 +175,7 @@ TEST(Strand, ThousandMixedCallsCompleteOnceDuringShutdown) {
                 switch (i % 4) {
                     case 0:
                         co_await channel->UnaryCallRaw(
-                            kStrandPath, context, "");
+                            kStrandPath, context, {});
                         break;
                     case 1: {
                         auto reader =
