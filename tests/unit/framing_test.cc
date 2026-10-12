@@ -130,6 +130,29 @@ TEST(FrameDecoder, MessageTooLarge) {
 
     dec.Feed(frame);
     EXPECT_TRUE(dec.error());
+    EXPECT_TRUE(dec.limit_exceeded());
+}
+
+TEST(FrameDecoder, FramingErrorsAreNotLimitViolations) {
+    std::string frame;
+    EncodeFrame(0, "data", frame);
+    frame[0] = 0x42;
+
+    FrameDecoder dec;
+    dec.Feed(frame);
+    EXPECT_TRUE(dec.error());
+    EXPECT_FALSE(dec.limit_exceeded());
+}
+
+TEST(FrameDecoder, ResetClearsLimitViolation) {
+    FrameDecoder dec(1);
+    std::string frame;
+    EncodeFrame(0, "too long", frame);
+    dec.Feed(frame);
+    ASSERT_TRUE(dec.limit_exceeded());
+
+    dec.Reset();
+    EXPECT_FALSE(dec.limit_exceeded());
 }
 
 TEST(FrameDecoder, MultipleChunksForOneMessage) {

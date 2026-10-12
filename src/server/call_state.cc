@@ -138,7 +138,8 @@ void ServerCallState::OnData(const uint8_t* data, std::size_t len) {
 
     decoder_.Feed({reinterpret_cast<const char*>(data), len});
     if (decoder_.error()) {
-        SendError(Status{StatusCode::INVALID_ARGUMENT,
+        SendError(Status{decoder_.limit_exceeded() ? StatusCode::RESOURCE_EXHAUSTED
+                                                  : StatusCode::INVALID_ARGUMENT,
                          "request framing error: " + decoder_.error_message()});
     }
 }
@@ -147,7 +148,8 @@ void ServerCallState::OnRequestEnd() {
     if (responded_) return;
 
     if (decoder_.error()) {
-        SendError(Status{StatusCode::INVALID_ARGUMENT,
+        SendError(Status{decoder_.limit_exceeded() ? StatusCode::RESOURCE_EXHAUSTED
+                                                  : StatusCode::INVALID_ARGUMENT,
                          "request framing error: " + decoder_.error_message()});
         return;
     }

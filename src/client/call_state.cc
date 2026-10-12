@@ -128,7 +128,8 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
                 self->decoder_.MarkEos();
                 if (self->decoder_.error()) {
                     self->Complete(UnaryResultRaw{
-                        Status{StatusCode::INTERNAL,
+                        Status{self->decoder_.limit_exceeded() ? StatusCode::RESOURCE_EXHAUSTED
+                                                               : StatusCode::INTERNAL,
                                "frame error: " + self->decoder_.error_message()}});
                 }
                 return;
@@ -136,7 +137,8 @@ void ClientCallState::Attach(const nghttp2::asio_http2::client::response& resp) 
             self->decoder_.Feed(copy);
             if (self->decoder_.error()) {
                 self->Complete(UnaryResultRaw{
-                    Status{StatusCode::INTERNAL,
+                    Status{self->decoder_.limit_exceeded() ? StatusCode::RESOURCE_EXHAUSTED
+                                                           : StatusCode::INTERNAL,
                            "frame error: " + self->decoder_.error_message()}});
             }
         });

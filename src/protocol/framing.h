@@ -77,6 +77,10 @@ public:
     // Description of the error (valid when state() == kError).
     const std::string& error_message() const noexcept { return error_message_; }
 
+    // True when the error is a declared length above max_message_size, which
+    // gRPC reports as RESOURCE_EXHAUSTED rather than a framing violation.
+    bool limit_exceeded() const noexcept { return limit_exceeded_; }
+
     // Reset to kAwaitingHeader; reuses max_message_size_.
     // Call between successive messages in a streaming context.
     void Reset();
@@ -91,6 +95,7 @@ private:
     State         state_{State::kAwaitingHeader};
     std::size_t   max_message_size_;
     bool          has_message_{false};
+    bool          limit_exceeded_{false};
 
     // Header accumulation (5 bytes)
     std::uint8_t  header_buf_[kLpmHeaderSize]{};

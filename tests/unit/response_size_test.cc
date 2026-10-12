@@ -84,6 +84,75 @@ TEST(ResponseSize, OneByteOverReturnsResourceExhausted) {
     EXPECT_EQ(s.code(), rpcpio::StatusCode::RESOURCE_EXHAUSTED) << s.message();
 }
 
+// Runs one unary call with the receive-side limits of both peers set, so the
+// violation is detected by the receiver's decoder rather than the sender.
+static rpcpio::Status RunWithReceiveLimits(std::size_t receive_limit,
+                                            std::size_t request_size,
+                                            std::size_t server_request_limit,
+                                            std::size_t resp_size) {
+    boost::asio::io_context server_ioc;
+    rpcpio::ServerOptions opts;
+    opts.use_h2c                  = true;
+    opts.num_threads              = 1;
+    opts.max_request_message_size = server_request_limit;
+
+    rpcpio::Server server(server_ioc, opts);
+    server.RegisterUnaryRaw(kSizePath,
+        [resp_size](rpcpio::ServerContext&,
+                    std::vector<char>,
+                    std::vector<char>& out) -> boost::asio::awaitable<rpcpio::Status> {
+            out.assign(resp_size, 'x');
+            co_return rpcpio::Status{};
+        });
+
+    if (!server.Start("127.0.0.1", 0).ok()) {
+        return rpcpio::Status{rpcpio::StatusCode::INTERNAL, "server start failed"};
+    }
+    std::uint16_t port = server.bound_port();
+    std::thread server_thread([&] { server_ioc.run(); });
+
+    boost::asio::io_context client_ioc;
+    rpcpio::ChannelOptions copts;
+    copts.use_h2c = true;
+    auto ch = std::make_shared<rpcpio::Channel>(client_ioc, "127.0.0.1", port, copts);
+
+    rpcpio::Status result{rpcpio::StatusCode::INTERNAL, "not set"};
+    boost::asio::co_spawn(client_ioc,
+        [ch, &result, receive_limit, request_size]() -> boost::asio::awaitable<void> {
+            rpcpio::ClientContext ctx;
+            ctx.set_max_receive_message_size(receive_limit);
+            auto raw = co_await ch->UnaryCallRaw(
+                kSizePath, ctx, std::vector<char>(request_size, 'r'));
+            result = raw.status;
+            ch->Shutdown();
+        },
+        boost::asio::detached);
+
+    client_ioc.run();
+    server.Shutdown();
+    server_thread.join();
+
+    return result;
+}
+
+TEST(ResponseSize, ClientReceiveLimitReturnsResourceExhausted) {
+    constexpr std::size_t kLimit = 64;
+    rpcpio::Status s = RunWithReceiveLimits(kLimit, 1, 1024, kLimit + 1);
+    EXPECT_EQ(s.code(), rpcpio::StatusCode::RESOURCE_EXHAUSTED) << s.message();
+}
+
+TEST(ResponseSize, ClientReceiveAtLimitSucceeds) {
+    constexpr std::size_t kLimit = 64;
+    rpcpio::Status s = RunWithReceiveLimits(kLimit, 1, 1024, kLimit);
+    EXPECT_TRUE(s.ok()) << s.message();
+}
+
+TEST(ResponseSize, ServerRequestLimitReturnsResourceExhausted) {
+    constexpr std::size_t kLimit = 64;
+    rpcpio::Status s = RunWithReceiveLimits(1024, kLimit + 1, kLimit, 1);
+    EXPECT_EQ(s.code(), rpcpio::StatusCode::RESOURCE_EXHAUSTED) << s.message();
+}
+
 // ── Server-streaming size tests ───────────────────────────────────────────────
 
 static constexpr std::string_view kStreamSizePath = "/test.Size/Stream";
