@@ -225,6 +225,7 @@ void RunInFlight(CancelSource source) {
     rpcpio::Server server(server_ioc, server_options);
     std::atomic<bool> handler_started{false};
     std::atomic<bool> handler_cancelled{false};
+    std::atomic<bool> cancellation_latched{false};
     server.RegisterUnaryRaw(
         kPath,
         [&](rpcpio::ServerContext& server_context,
@@ -242,6 +243,7 @@ void RunInFlight(CancelSource source) {
                         boost::asio::use_awaitable, error)));
             handler_cancelled =
                 error == boost::asio::error::operation_aborted;
+            cancellation_latched = server_context.cancelled();
             co_return rpcpio::Status{
                 rpcpio::StatusCode::CANCELLED, "cancelled"};
         });
@@ -276,6 +278,7 @@ void RunInFlight(CancelSource source) {
     }));
     ASSERT_TRUE(WaitFor([&] { return handler_cancelled.load(); }));
 
+    EXPECT_TRUE(cancellation_latched.load());
     EXPECT_EQ(
         observation.status.code(), rpcpio::StatusCode::CANCELLED);
     EXPECT_EQ(observation.completion_thread, caller_thread_id);
