@@ -58,6 +58,7 @@ void FrameDecoder::TryParseHeader() {
 
     // Reject before allocating.
     if (payload_len_ > max_message_size_) {
+        limit_exceeded_ = true;
         SetError("message length " + std::to_string(payload_len_) +
                  " exceeds limit " + std::to_string(max_message_size_));
         return;
@@ -123,7 +124,8 @@ void FrameDecoder::Reset() {
     payload_len_   = 0;
     payload_.clear();
     error_message_.clear();
-    has_message_   = false;
+    has_message_    = false;
+    limit_exceeded_ = false;
 }
 
 void FrameDecoder::MarkEos() {
