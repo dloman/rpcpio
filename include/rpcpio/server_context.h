@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <optional>
 #include <string>
@@ -59,6 +60,10 @@ public:
         return cancel_signal_.slot();
     }
 
+    bool cancelled() const noexcept {
+        return cancelled_.load(std::memory_order_acquire);
+    }
+
     ServerContext(const ServerContext&)            = delete;
     ServerContext& operator=(const ServerContext&) = delete;
 
@@ -74,6 +79,7 @@ private:
     void set_has_deadline(bool v)                                         { has_deadline_ = v; }
     void set_client_metadata(MetadataMap meta)                            { client_metadata_ = std::move(meta); }
     void trigger_cancel()                                                  {
+        cancelled_.store(true, std::memory_order_release);
         cancel_signal_.emit(boost::asio::cancellation_type::all);
     }
 
@@ -84,6 +90,7 @@ private:
     std::chrono::system_clock::time_point deadline_{};
     MetadataMap initial_metadata_;
     MetadataMap trailing_metadata_;
+    std::atomic<bool> cancelled_{false};
     boost::asio::cancellation_signal cancel_signal_;
 };
 
