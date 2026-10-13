@@ -1,6 +1,6 @@
 module(name = "rpcpio_boost_1_87_test")
 
-bazel_dep(name = "rpcpio", version = "0.1.0")
+bazel_dep(name = "rpcpio", version = "0.1.1")
 bazel_dep(name = "boost.asio", version = "1.87.0")
 
 local_path_override(
