@@ -15,6 +15,6 @@ single_version_override(
 
 git_override(
     module_name = "nghttp2-asio",
-    commit = "a113ed3e48611f22615e9d9910d71348dbdfa9af",
+    commit = "a63881db0150f1225d4ab927acecefbefa10008f",
     remote = "https://github.com/dloman/nghttp2-asio.git",
 )
