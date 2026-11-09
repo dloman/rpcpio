@@ -1,6 +1,6 @@
 module(name = "rpcpio_boost_1_87_test")
 
-bazel_dep(name = "rpcpio", version = "0.1.1")
+bazel_dep(name = "rpcpio", version = "0.1.2")
 bazel_dep(name = "boost.asio", version = "1.87.0")
 
 local_path_override(
@@ -15,6 +15,6 @@ single_version_override(
 
 git_override(
     module_name = "nghttp2-asio",
-    commit = "a63881db0150f1225d4ab927acecefbefa10008f",
+    commit = "61cb930b2572ba44b99a3e25e3e3ffde193d7257",
     remote = "https://github.com/dloman/nghttp2-asio.git",
 )
